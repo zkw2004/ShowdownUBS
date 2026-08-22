@@ -14,8 +14,12 @@ def objective_raise_target(ctx: Context, base_total: int) -> int:
 def should_force_leader_showdown(ctx: Context, share: float) -> bool:
     """Take a high-variance line when ordinary pots can no longer clear the leg.
 
-    This is deliberately limited to heads-up pots against the unique table
-    leader. Earlier and multiway decisions remain chip-EV decisions.
+    The unique table leader must be in the pot, contested by at most one other
+    live opponent so the equity floor below stays meaningful.  Requiring a
+    strictly heads-up pot never fired in practice: a four- or five-handed leg
+    rarely isolates us against that specific opponent.  `ordinary_recovery`
+    below, not the hand count, is what keeps this off while the gap is still
+    winnable by normal play.
     """
     leader_seat = ctx.sole_leader_seat
     if (
@@ -23,8 +27,9 @@ def should_force_leader_showdown(ctx: Context, share: float) -> bool:
         or ctx.leads_table
         or not ctx.can_raise
         or leader_seat is None
-        or ctx.live_opponent_seats != (leader_seat,)
-        or ctx.remaining_hands > 8
+        or leader_seat not in ctx.live_opponent_seats
+        or ctx.live_opponent_count > 2
+        or ctx.remaining_hands > 20
     ):
         return False
 
@@ -45,6 +50,10 @@ def should_force_leader_showdown(ctx: Context, share: float) -> bool:
         equity_floor = 0.25
     elif ctx.remaining_hands <= 5:
         equity_floor = 0.35
-    else:
+    elif ctx.remaining_hands <= 8:
         equity_floor = 0.45
+    elif ctx.remaining_hands <= 12:
+        equity_floor = 0.50
+    else:
+        equity_floor = 0.55
     return share >= equity_floor

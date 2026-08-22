@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 
 from showdown.models import Context
-from showdown.strategy.profiles import SeatProfile, profiles_from_window
+from showdown.strategy.profiles import SeatProfile, profiles_from_hands
 
 # Beta-style prior on the opponent's pre-reveal raise frequency: centred on 0.5
 # with the weight of four observed hands, so the first few live hands dominate
@@ -84,6 +84,7 @@ class AttemptState:
     last_match_key: str | None = None
     opponent: OpponentModel = field(default_factory=OpponentModel)
     seat_profiles: dict[int, SeatProfile] = field(default_factory=dict)
+    _seen_profile_hands: set[tuple[str | None, int | None]] = field(default_factory=set)
 
     def observe(self, ctx: Context) -> bool:
         """Return whether this request begins a new leg."""
@@ -91,6 +92,7 @@ class AttemptState:
         if match_key is not None and match_key != self.last_match_key:
             self.opponent = OpponentModel()
             self.seat_profiles = {}
+            self._seen_profile_hands = set()
             self.last_match_key = match_key
         new_leg = ctx.leg_number is not None and ctx.leg_number != self.last_leg
         if new_leg:
@@ -98,12 +100,19 @@ class AttemptState:
         if ctx.match_id is not None:
             self.last_match_id = ctx.match_id
         self.opponent.update(ctx)
-        # recent_hands resets every leg; keep per-seat reads across legs of one
-        # attempt because the same five bots sit the same seats every time.
-        for seat, profile in profiles_from_window(ctx).items():
-            previous = self.seat_profiles.get(seat)
-            if previous is None or profile.hands >= previous.hands:
-                self.seat_profiles[seat] = profile
+        # recent_hands resets every leg. In Phase 3 the same five bots occupy
+        # the same seats in all four legs, so accumulate each completed hand
+        # once across the entire attempt rather than replacing one 20-hand
+        # window with another.
+        for hand in ctx.raw.get("recent_hands") or []:
+            if not isinstance(hand, dict):
+                continue
+            hand_key = (ctx.match_id, _optional_hand_number(hand.get("hand_number")))
+            if hand_key in self._seen_profile_hands:
+                continue
+            self._seen_profile_hands.add(hand_key)
+            for seat, profile in profiles_from_hands([hand], ctx.your_seat).items():
+                self.seat_profiles[seat] = self.seat_profiles.get(seat, SeatProfile()).plus(profile)
         return new_leg
 
     def reset(self) -> None:
@@ -112,6 +121,13 @@ class AttemptState:
         self.last_match_key = None
         self.opponent = OpponentModel()
         self.seat_profiles = {}
+        self._seen_profile_hands = set()
 
 
 ATTEMPT_STATE = AttemptState()
+
+
+def _optional_hand_number(value: object) -> int | None:
+    if value is None:
+        return None
+    return int(value)

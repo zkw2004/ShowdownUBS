@@ -60,6 +60,7 @@ def decide(body: dict) -> Action:
         live_opponents=ctx.live_opponent_count,
         committed_opponents=len(ranges),
         multiway=ctx.is_multiway,
+        effective_pot=ctx.effective_pot,
         leads_table=ctx.leads_table,
         chips_needed_to_lead=ctx.chips_needed_to_lead,
     )

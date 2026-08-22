@@ -18,6 +18,7 @@ class SeatProfile:
 
     hands: int = 0
     pre_raises: int = 0
+    pre_continues: int = 0
     bets_faced: int = 0
     folds_to_bet: int = 0
     post_bets: int = 0
@@ -28,12 +29,28 @@ class SeatProfile:
         return (self.pre_raises + _PRIOR_RAISES) / (self.hands + _PRIOR_HANDS)
 
     @property
+    def vpip(self) -> float:
+        """How often this seat voluntarily calls or raises before the reveal."""
+        return (self.pre_continues + 4.0) / (self.hands + 8.0)
+
+    @property
     def fold_to_bet(self) -> float:
         return (self.folds_to_bet + _PRIOR_FOLDS) / (self.bets_faced + _PRIOR_BETS_FACED)
 
     @property
     def post_aggression(self) -> float:
         return (self.post_bets + 2.0) / (self.post_actions + 6.0)
+
+    def plus(self, other: "SeatProfile") -> "SeatProfile":
+        return SeatProfile(
+            hands=self.hands + other.hands,
+            pre_raises=self.pre_raises + other.pre_raises,
+            pre_continues=self.pre_continues + other.pre_continues,
+            bets_faced=self.bets_faced + other.bets_faced,
+            folds_to_bet=self.folds_to_bet + other.folds_to_bet,
+            post_bets=self.post_bets + other.post_bets,
+            post_actions=self.post_actions + other.post_actions,
+        )
 
 
 def profiles_from_window(ctx: Context) -> dict[int, SeatProfile]:
@@ -42,11 +59,15 @@ def profiles_from_window(ctx: Context) -> dict[int, SeatProfile]:
     The protocol already sends the last 20 completed hands. Using that window
     keeps the model correct after a dyno restart and never keys off names.
     """
+    return profiles_from_hands(ctx.raw.get("recent_hands") or [], ctx.your_seat)
+
+
+def profiles_from_hands(hands: list[dict], your_seat: int) -> dict[int, SeatProfile]:
     buckets: dict[int, _MutableSeat] = {}
-    for hand in ctx.raw.get("recent_hands") or []:
+    for hand in hands:
         if not isinstance(hand, dict):
             continue
-        _ingest_hand(buckets, hand, ctx.your_seat)
+        _ingest_hand(buckets, hand, your_seat)
     return {seat: bucket.freeze() for seat, bucket in buckets.items()}
 
 
@@ -54,6 +75,7 @@ def profiles_from_window(ctx: Context) -> dict[int, SeatProfile]:
 class _MutableSeat:
     hands: int = 0
     pre_raises: int = 0
+    pre_continues: int = 0
     bets_faced: int = 0
     folds_to_bet: int = 0
     post_bets: int = 0
@@ -63,6 +85,7 @@ class _MutableSeat:
         return SeatProfile(
             hands=self.hands,
             pre_raises=self.pre_raises,
+            pre_continues=self.pre_continues,
             bets_faced=self.bets_faced,
             folds_to_bet=self.folds_to_bet,
             post_bets=self.post_bets,
@@ -88,6 +111,7 @@ def _ingest_hand(buckets: dict[int, _MutableSeat], hand: dict, your_seat: int) -
         buckets.setdefault(seat, _MutableSeat()).hands += 1
 
     raised_pre: set[int] = set()
+    continued_pre: set[int] = set()
     for action in actions:
         seat = int(action.get("seat", -1))
         if seat < 0 or seat == your_seat:
@@ -97,6 +121,8 @@ def _ingest_hand(buckets: dict[int, _MutableSeat], hand: dict, your_seat: int) -
         round_name = action.get("round")
         if round_name == "pre_reveal" and kind == "raise":
             raised_pre.add(seat)
+        if round_name == "pre_reveal" and kind in {"call", "raise"}:
+            continued_pre.add(seat)
         if round_name == "post_reveal":
             bucket.post_actions += 1
             if kind in {"bet", "raise"}:
@@ -104,6 +130,8 @@ def _ingest_hand(buckets: dict[int, _MutableSeat], hand: dict, your_seat: int) -
 
     for seat in raised_pre:
         buckets[seat].pre_raises += 1
+    for seat in continued_pre:
+        buckets[seat].pre_continues += 1
 
     _count_folds_to_aggression(buckets, actions, your_seat)
 

@@ -2,6 +2,8 @@ from showdown.equity import multiway_adjusted_equity, post_reveal_multiway_equit
 from showdown.evaluator.registry import get_rule
 from showdown.models import parse_context
 from showdown.strategy.decide import _is_phase3, decide
+from showdown.strategy.ranges import committed_opponent_seats
+from showdown.strategy.state import ATTEMPT_STATE
 
 from tests.conftest import cloned_request
 
@@ -327,6 +329,8 @@ def test_ten_calls_a_three_big_blind_open() -> None:
             "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 8}],
         }
     )
+    body["players"][0]["bet_this_round"] = 2
+    body["players"][1]["bet_this_round"] = 8
     assert decide(body).action in {"call", "raise"}
 
 
@@ -349,12 +353,14 @@ def test_amaranth_twelve_calls_a_five_chip_open() -> None:
             "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 6}],
         }
     )
+    body["players"][0]["bet_this_round"] = 1
+    body["players"][1]["bet_this_round"] = 6
     assert decide(body).action in {"call", "raise"}
 
 
-def test_obsidian_two_calls_a_large_raise() -> None:
-    """2 is the second-best unpaired number under obsidian; v11 folded it to 107."""
-    body = cloned_request()
+def test_obsidian_two_folds_when_multiway_share_is_below_the_price() -> None:
+    """A top-two number is still not an automatic call in a crowded pot."""
+    body = _six_seat_body()
     body.update(
         {
             "phase": 3,
@@ -364,12 +370,30 @@ def test_obsidian_two_calls_a_large_raise() -> None:
             "your_number": 2,
             "to_call": 107,
             "pot": 168,
-            "your_stack": 200,
-            "legal_actions": ["fold", "call"],
-            "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 109}],
+            "your_stack": 193,
+            "min_raise_to": 195,
+            "max_raise_to": 200,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [
+                {"seat": 5, "round": "pre_reveal", "action": "raise", "amount": 7},
+                {"seat": 0, "round": "pre_reveal", "action": "call", "amount": 7},
+                {"seat": 1, "round": "pre_reveal", "action": "fold"},
+                {"seat": 2, "round": "pre_reveal", "action": "call", "amount": 7},
+                {"seat": 3, "round": "pre_reveal", "action": "call", "amount": 7},
+                {"seat": 4, "round": "pre_reveal", "action": "raise", "amount": 33},
+                {"seat": 5, "round": "pre_reveal", "action": "raise", "amount": 114},
+            ],
+            "players": [
+                {"seat": 0, "name": "you", "chip_delta": 0, "bet_this_round": 7, "stack": 193},
+                {"seat": 1, "name": "one", "chip_delta": 8, "bet_this_round": 0, "stack": 208, "folded": True},
+                {"seat": 2, "name": "two", "chip_delta": -3, "bet_this_round": 7, "stack": 190},
+                {"seat": 3, "name": "three", "chip_delta": 81, "bet_this_round": 7, "stack": 274},
+                {"seat": 4, "name": "four", "chip_delta": 0, "bet_this_round": 33, "stack": 167},
+                {"seat": 5, "name": "five", "chip_delta": -86, "bet_this_round": 114, "stack": 0, "all_in": True},
+            ],
         }
     )
-    assert decide(body).action == "call"
+    assert decide(body).action == "fold"
 
 
 def test_six_max_button_does_not_open_a_seven() -> None:
@@ -399,6 +423,200 @@ def test_six_max_button_does_not_open_a_seven() -> None:
         }
     )
     assert decide(body).action == "fold"
+
+
+def test_overjam_pot_odds_exclude_unmatched_chips() -> None:
+    body = cloned_request()
+    body.update(
+        {
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_stack": 354,
+            "pot": 846,
+            "to_call": 842,
+            "players": [
+                {
+                    "seat": 0,
+                    "name": "you",
+                    "bet_this_round": 2,
+                    "stack": 354,
+                    "folded": False,
+                    "busted": False,
+                },
+                {
+                    "seat": 1,
+                    "name": "opponent",
+                    "bet_this_round": 844,
+                    "stack": 0,
+                    "all_in": True,
+                    "folded": False,
+                    "busted": False,
+                },
+            ],
+        }
+    )
+    context = parse_context(body)
+    assert context.effective_call == 354
+    assert context.effective_pot == 358
+    assert abs(context.adjusted_pot_odds - (354 / 712)) < 1e-9
+
+
+def test_all_in_opponent_remains_in_the_showdown_range() -> None:
+    body = _six_seat_body()
+    body["players"][1]["all_in"] = True
+    body["players"][1]["stack"] = 0
+    body["current_hand_actions"] = [{"seat": 2, "round": "post_reveal", "action": "bet", "amount": 4}]
+    context = parse_context(body)
+    assert committed_opponent_seats(context) == (1, 2)
+
+
+def test_profiles_accumulate_across_all_four_legs() -> None:
+    first = _six_seat_body()
+    first["recent_hands"] = [
+        {
+            "hand_number": 1,
+            "shown_numbers": {"1": 13},
+            "actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 6}],
+        }
+    ]
+    ATTEMPT_STATE.observe(parse_context(first))
+
+    second = _six_seat_body()
+    second["leg_number"] = 2
+    second["match_id"] = "phase3-fixture-leg2"
+    second["recent_hands"] = [
+        {
+            "hand_number": 1,
+            "shown_numbers": {"1": 8},
+            "actions": [{"seat": 1, "round": "pre_reveal", "action": "call", "amount": 2}],
+        }
+    ]
+    ATTEMPT_STATE.observe(parse_context(second))
+
+    profile = ATTEMPT_STATE.seat_profiles[1]
+    assert profile.hands == 2
+    assert profile.pre_raises == 1
+    assert profile.pre_continues == 2
+
+
+def test_medium_number_does_not_isolate_two_limpers() -> None:
+    body = _six_seat_body()
+    body.update(
+        {
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_number": 9,
+            "pot": 7,
+            "to_call": 2,
+            "min_raise_to": 4,
+            "max_raise_to": 200,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [
+                {"seat": 3, "round": "pre_reveal", "action": "call", "amount": 2},
+                {"seat": 4, "round": "pre_reveal", "action": "call", "amount": 2},
+            ],
+            "players": [
+                {"seat": 0, "name": "you", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+                {"seat": 1, "name": "one", "chip_delta": 0, "bet_this_round": 1, "busted": False},
+                {"seat": 2, "name": "two", "chip_delta": 0, "bet_this_round": 2, "busted": False},
+                {"seat": 3, "name": "three", "chip_delta": 0, "bet_this_round": 2, "busted": False},
+                {"seat": 4, "name": "four", "chip_delta": 0, "bet_this_round": 2, "busted": False},
+                {"seat": 5, "name": "five", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+            ],
+        }
+    )
+    assert decide(body).action in {"fold", "call"}
+
+
+def test_late_top_number_open_is_sized_to_take_the_lead() -> None:
+    body = _six_seat_body()
+    body.update(
+        {
+            "round": "pre_reveal",
+            "community_number": None,
+            "hand_number": 55,
+            "your_number": 13,
+            "your_seat": 3,
+            "pot": 3,
+            "to_call": 2,
+            "min_raise_to": 4,
+            "max_raise_to": 200,
+            "your_stack": 200,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [],
+            "players": [
+                {"seat": 0, "name": "one", "chip_delta": 100, "bet_this_round": 0, "busted": False},
+                {"seat": 1, "name": "two", "chip_delta": 0, "bet_this_round": 1, "busted": False},
+                {"seat": 2, "name": "three", "chip_delta": 0, "bet_this_round": 2, "busted": False},
+                {"seat": 3, "name": "you", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+                {"seat": 4, "name": "four", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+                {"seat": 5, "name": "five", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+            ],
+        }
+    )
+    action = decide(body)
+    assert action.action == "raise"
+    assert action.amount is not None and action.amount >= 100
+
+
+def test_late_post_reveal_nuts_bet_can_take_the_lead() -> None:
+    body = _six_seat_body()
+    body.update(
+        {
+            "round": "post_reveal",
+            "community_number": 7,
+            "your_number": 7,
+            "hand_number": 55,
+            "pot": 20,
+            "to_call": 0,
+            "min_raise_to": 2,
+            "max_raise_to": 200,
+            "your_stack": 200,
+            "legal_actions": ["check", "bet"],
+            "current_hand_actions": [],
+            "players": [
+                {"seat": 0, "name": "you", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+                {"seat": 1, "name": "one", "chip_delta": 100, "bet_this_round": 0, "busted": False},
+                {"seat": 2, "name": "two", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+                {"seat": 3, "name": "three", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+                {"seat": 4, "name": "four", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+                {"seat": 5, "name": "five", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+            ],
+        }
+    )
+    action = decide(body)
+    assert action.action == "bet"
+    assert action.amount is not None and action.amount >= 100
+
+
+def test_late_post_reveal_nuts_raise_can_take_the_lead() -> None:
+    body = _six_seat_body()
+    body.update(
+        {
+            "round": "post_reveal",
+            "community_number": 7,
+            "your_number": 7,
+            "hand_number": 55,
+            "pot": 30,
+            "to_call": 10,
+            "min_raise_to": 20,
+            "max_raise_to": 200,
+            "your_stack": 200,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [{"seat": 1, "round": "post_reveal", "action": "bet", "amount": 10}],
+            "players": [
+                {"seat": 0, "name": "you", "chip_delta": 0, "bet_this_round": 0, "stack": 200},
+                {"seat": 1, "name": "one", "chip_delta": 100, "bet_this_round": 10, "stack": 290},
+                {"seat": 2, "name": "two", "chip_delta": 0, "bet_this_round": 0, "folded": True},
+                {"seat": 3, "name": "three", "chip_delta": 0, "bet_this_round": 0, "folded": True},
+                {"seat": 4, "name": "four", "chip_delta": 0, "bet_this_round": 0, "folded": True},
+                {"seat": 5, "name": "five", "chip_delta": 0, "bet_this_round": 0, "folded": True},
+            ],
+        }
+    )
+    action = decide(body)
+    assert action.action == "raise"
+    assert action.amount is not None and action.amount >= 100
 
 
 def test_strategy_code_does_not_hardcode_opponent_names() -> None:

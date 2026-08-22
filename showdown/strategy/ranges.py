@@ -86,6 +86,12 @@ def committed_opponent_seats(ctx: Context) -> tuple[int, ...]:
             continue
         if action.get("action") in {"call", "raise", "bet"}:
             invested.add(seat)
+    for player in ctx.raw.get("players") or []:
+        seat = int(player.get("seat", -1))
+        if seat in ctx.live_opponent_seats and bool(player.get("all_in", False)):
+            # An opponent all-in on an earlier street may have no action on
+            # this street, but they still compete for the main pot.
+            invested.add(seat)
     return tuple(seat for seat in ctx.live_opponent_seats if seat in invested)
 
 
@@ -149,8 +155,10 @@ def range_for_seat(
                 fraction *= 0.75 if profile.pfr < 0.42 else 0.92
         return top_numbers(ctx.table_rule, max(0.15, min(0.80, fraction)), community)
     if calls:
-        # Callers show up with most playable numbers, including some traps.
-        keep = max(5, min(13, round(13 * min(0.85, mixed + 0.20))))
+        # Passive seats can call far more often than they raise. VPIP captures
+        # that width; PFR alone incorrectly modelled a loose caller as a nit.
+        call_fraction = max(0.40, min(0.90, profile.vpip + 0.15))
+        keep = max(5, min(13, round(13 * call_fraction)))
         return ordered_numbers(ctx.table_rule, community)[:keep]
     return UNIFORM
 

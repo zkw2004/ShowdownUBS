@@ -28,12 +28,12 @@ def test_preflop_button_bottom_number_folds_instead_of_completing() -> None:
     assert decide(_button_complete_body(1)).action == "fold"
 
 
-def test_postflop_pair_calls_a_bet_instead_of_raising() -> None:
+def test_postflop_pair_raises_a_bet_for_value() -> None:
     body = cloned_request()
     body["your_number"] = 7
     body["community_number"] = 7
     action = decide(body)
-    assert action.action == "call"
+    assert action.action == "raise"
 
 
 def test_postflop_weak_hand_folds_to_bet() -> None:

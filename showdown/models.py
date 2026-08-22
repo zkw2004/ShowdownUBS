@@ -50,11 +50,31 @@ class Context:
         return max(0, min(self.to_call, self.your_stack))
 
     @property
+    def effective_pot(self) -> int:
+        """Pot we are eligible to win after unmatched overbets are returned.
+
+        The protocol includes the bettor's full overbet in `pot`, even when
+        our shorter stack cannot cover it. Contributions above our final
+        round total belong to a side pot (or are returned), so counting them
+        made short-stack calls look much cheaper than they really were.
+        """
+        cap_total = self.my_bet_this_round + self.effective_call
+        inaccessible = 0
+        for player in self.raw.get("players") or []:
+            if int(player.get("seat", -1)) == self.your_seat:
+                continue
+            if bool(player.get("folded", False)) or bool(player.get("busted", False)):
+                continue
+            contribution = int(player.get("bet_this_round", 0) or 0)
+            inaccessible += max(0, contribution - cap_total)
+        return max(0, self.pot - inaccessible)
+
+    @property
     def adjusted_pot_odds(self) -> float:
         call = self.effective_call
         if call <= 0:
             return 0.0
-        denominator = self.pot + call
+        denominator = self.effective_pot + call
         return call / denominator if denominator > 0 else 1.0
 
     @property

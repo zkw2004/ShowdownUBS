@@ -1,0 +1,17 @@
+[project]
+name = "showdown-phase1"
+version = "0.1.0"
+description = "Phase 1 bot for the UBS Showdown challenge"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.116,<1",
+    "uvicorn>=0.35,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4,<9",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

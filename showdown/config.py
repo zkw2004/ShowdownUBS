@@ -1,0 +1,47 @@
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Config:
+    open_raise_high_min_number: int = 11
+    open_raise_mid_min_number: int = 8
+    complete_call_min_number: int = 1
+    big_blind_iso_raise_min_number: int = 10
+    big_blind_reraise_min_number: int = 12
+    big_blind_call_min_number: int = 8
+    big_blind_defend_min_number: int = 5
+    small_preflop_raise_cap_bb: float = 4.0
+    max_preflop_commit_fraction: float = 0.15
+    max_normal_commit_fraction: float = 0.40
+    short_stack_threshold: int = 60
+    short_stack_tighten: float = 0.10
+    protect_lead_after_hand: int = 75
+    protect_lead_chip_delta: int = 25
+    protect_lead_tighten: float = 0.08
+    protect_lead_max_commit_fraction: float = 0.20
+    chase_after_hand: int = 90
+    chase_if_below_delta: int = 10
+    chase_loosen: float = 0.07
+    call_equity_margin: float = 0.05
+    value_raise_margin: float = 0.20
+    high_value_equity: float = 0.70
+    medium_value_equity: float = 0.55
+    check_band_equity: float = 0.35
+    strong_raise_equity: float = 0.75
+    all_in_equity_threshold: float = 0.60
+    all_in_pot_odds_threshold: float = 0.30
+    low_equity_bluff_threshold: float = 0.35
+    bluff_frequency: float = 0.15
+    bluff_bet_fraction: float = 0.50
+    bluff_max_stack_fraction: float = 0.25
+    pair_bet_fraction: float = 0.70
+    strong_value_bet_fraction: float = 0.60
+    medium_value_bet_fraction: float = 0.40
+    pair_raise_multiplier: float = 2.8
+    value_raise_multiplier: float = 2.5
+    preflop_reraise_multiplier: float = 2.5
+    default_open_raise_to_bb: float = 3.0
+    medium_open_raise_to_bb: float = 2.5
+
+
+CONFIG = Config()

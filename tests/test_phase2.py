@@ -69,3 +69,22 @@ def test_large_post_reveal_reraise_never_commits_a_large_fraction_of_stack() -> 
         "max_raise_to": 169,
     })
     assert decide(body).action == "fold"
+
+
+def test_post_reveal_opponent_raise_is_not_reraised() -> None:
+    body = cloned_request()
+    body.update({
+        "table_rule": "standard",
+        "round": "post_reveal",
+        "your_number": 13,
+        "community_number": 8,
+        "pot": 40,
+        "to_call": 12,
+        "your_stack": 180,
+        "legal_actions": ["fold", "call", "raise"],
+        "current_hand_actions": [
+            {"seat": 0, "round": "post_reveal", "action": "bet", "amount": 8},
+            {"seat": 1, "round": "post_reveal", "action": "raise", "amount": 20},
+        ],
+    })
+    assert decide(body).action == "call"

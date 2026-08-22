@@ -30,6 +30,15 @@ def decide_postflop(
     ):
         return Action("fold")
 
+    # Do not turn a normal value bet into a raising war.  The opponent knows
+    # the table rule, while our equity is calculated against an unconditioned
+    # random number.  After their post-reveal raise, preserve showdown value
+    # with a cheap call or release the hand; never make the second re-raise.
+    if _opponent_raised_post_reveal(ctx):
+        if ctx.to_call / max(ctx.your_stack, 1) <= 0.08 and ctx.can_call:
+            return Action("call")
+        return Action("fold")
+
     if ctx.to_call == 0:
         if adjusted_equity >= max(rule_config.value_bet_min_equity + 0.10, 0.74):
             return fraction_of_pot_raise(ctx, rule_config.bet_size_pot_fraction)
@@ -64,6 +73,15 @@ def _unknown_action(ctx: Context) -> Action:
     if ctx.to_call <= cap and ctx.to_call < ctx.your_stack and ctx.can_call:
         return Action("call")
     return Action("fold")
+
+
+def _opponent_raised_post_reveal(ctx: Context) -> bool:
+    for action in ctx.raw.get("current_hand_actions") or []:
+        if not isinstance(action, dict):
+            continue
+        if action.get("round") == "post_reveal" and action.get("seat") != ctx.your_seat and action.get("action") == "raise":
+            return True
+    return False
 
 
 def _should_raise_for_value(ctx: Context, adjusted_equity: float, aggression_margin: float) -> bool:

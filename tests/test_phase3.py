@@ -146,6 +146,35 @@ def test_amaranth_treats_seven_as_the_nuts() -> None:
     assert rule.rank(7, 1) > rule.rank(13, 1)
     assert rule.rank(7, 4) > rule.rank(12, 4)
     assert rule.rank(12, 9) > rule.rank(11, 9)
+    # Live H25: pair of 13s beat an unpaired 7.
+    assert rule.rank(13, 13) > rule.rank(7, 13)
+
+
+def test_short_stack_calls_an_overjam_with_a_premium() -> None:
+    """to_call 413 vs stack 75 used to make required_equity 1.5 and fold a 7."""
+    body = cloned_request()
+    body.update(
+        {
+            "phase": 3,
+            "table_rule": "amaranth",
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_number": 7,
+            "to_call": 413,
+            "pot": 709,
+            "your_stack": 75,
+            "legal_actions": ["fold", "call"],
+            "current_hand_actions": [
+                {"seat": 0, "round": "pre_reveal", "action": "raise", "amount": 6},
+                {"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 419},
+            ],
+            "players": [
+                {"seat": 0, "name": "you", "chip_delta": -73, "stack": 75, "busted": False, "folded": False},
+                {"seat": 1, "name": "Miles", "chip_delta": 408, "stack": 608, "busted": False, "folded": False},
+            ],
+        }
+    )
+    assert decide(body).action == "call"
 
 
 def test_twelve_calls_a_small_open_instead_of_folding() -> None:

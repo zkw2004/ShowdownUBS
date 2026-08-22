@@ -37,8 +37,10 @@ def _respond_to_raise(ctx: Context, opponent_raises: int, rule_config: RuleConfi
     equity = pre_reveal_multiway_equity_vs_range(
         ctx.your_number, ctx.table_rule, range_fraction, ctx.live_opponent_count
     )
-    risk_fraction = ctx.to_call / max(ctx.your_stack, 1)
+    risk_fraction = ctx.risk_fraction
     required = ctx.adjusted_pot_odds + rule_config.call_equity_margin + CONFIG.risk_extra_margin * risk_fraction
+    if ctx.chips_needed_to_lead > 80:
+        required = max(0.0, required - 0.08)
     detail = dict(
         opponent_raises=opponent_raises,
         live_opponents=ctx.live_opponent_count,
@@ -50,14 +52,7 @@ def _respond_to_raise(ctx: Context, opponent_raises: int, rule_config: RuleConfi
         risk_fraction=round(risk_fraction, 4),
     )
 
-    if ctx.to_call >= ctx.your_stack:
-        if equity >= max(required, CONFIG.all_in_equity_threshold) and ctx.can_call:
-            mark(ctx, "preflop_allin_call", **detail)
-            return Action("call")
-        mark(ctx, "preflop_allin_fold", **detail)
-        return Action("fold") if ctx.can_fold else call_or_check(ctx)
-
-    if equity >= CONFIG.preflop_value_reraise_equity and ctx.can_raise:
+    if equity >= CONFIG.preflop_value_reraise_equity and ctx.can_raise and ctx.effective_call < ctx.your_stack:
         # Multiway 3-bets have to get through every remaining seat. Only
         # isolate when heads-up, or when the number is effectively the nuts.
         if ctx.live_opponent_count <= 1 or equity >= 0.90:
@@ -68,6 +63,18 @@ def _respond_to_raise(ctx: Context, opponent_raises: int, rule_config: RuleConfi
                 CONFIG.preflop_reraise_multiplier,
                 cap_fraction_of_stack=rule_config.max_commitment_fraction,
             )
+
+    if equity >= 0.72 and ctx.can_call:
+        mark(ctx, "preflop_premium_call", **detail)
+        return Action("call")
+
+    if ctx.effective_call >= ctx.your_stack:
+        if equity >= max(required, CONFIG.all_in_equity_threshold) and ctx.can_call:
+            mark(ctx, "preflop_allin_call", **detail)
+            return Action("call")
+        mark(ctx, "preflop_allin_fold", **detail)
+        return Action("fold") if ctx.can_fold else call_or_check(ctx)
+
     if equity >= required and ctx.can_call:
         mark(ctx, "preflop_raise_call", **detail)
         return Action("call")

@@ -45,11 +45,21 @@ class Context:
     player_deltas: tuple[tuple[int, int], ...]
 
     @property
+    def effective_call(self) -> int:
+        """Chips we actually put in if we call. Never more than our stack."""
+        return max(0, min(self.to_call, self.your_stack))
+
+    @property
     def adjusted_pot_odds(self) -> float:
-        if self.to_call <= 0:
+        call = self.effective_call
+        if call <= 0:
             return 0.0
-        denominator = self.pot + self.to_call
-        return self.to_call / denominator if denominator > 0 else 1.0
+        denominator = self.pot + call
+        return call / denominator if denominator > 0 else 1.0
+
+    @property
+    def risk_fraction(self) -> float:
+        return self.effective_call / max(self.your_stack, 1)
 
     @property
     def can_raise(self) -> bool:

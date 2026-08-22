@@ -82,8 +82,10 @@ def _decide_facing_chips(
         range_fraction,
         ctx.live_opponent_count,
     )
-    risk_fraction = ctx.to_call / max(ctx.your_stack, 1)
+    risk_fraction = ctx.risk_fraction
     required = ctx.adjusted_pot_odds + aggression_margin + CONFIG.risk_extra_margin * risk_fraction
+    if ctx.chips_needed_to_lead > 80:
+        required = max(0.0, required - 0.08)
     detail = dict(
         raised_over_us=raised_over_us,
         live_opponents=ctx.live_opponent_count,
@@ -95,11 +97,11 @@ def _decide_facing_chips(
         risk_fraction=round(risk_fraction, 4),
     )
 
-    if equity >= 0.90 and ctx.can_call:
+    if equity >= 0.72 and ctx.can_call:
         mark(ctx, "nuts_call", **detail)
         return Action("call")
 
-    if ctx.to_call >= ctx.your_stack:
+    if ctx.effective_call >= ctx.your_stack:
         if equity >= max(required, CONFIG.all_in_equity_threshold) and ctx.can_call:
             mark(ctx, "postflop_allin_call", **detail)
             return Action("call")

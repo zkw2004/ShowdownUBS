@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from showdown.config import CONFIG, PHASE2_CONFIG, RuleConfig
-from showdown.equity import post_reveal_equity, pre_reveal_equity
+from showdown.config import CONFIG, PHASE2_CONFIG, PHASE3_CONFIG, RuleConfig
+from showdown.equity import (
+    post_reveal_equity,
+    post_reveal_multiway_equity,
+    pre_reveal_equity,
+    pre_reveal_multiway_equity,
+)
 from showdown.evaluator.registry import get_rule
 from showdown.models import Action, parse_context
 from showdown.strategy.postflop import decide_postflop
@@ -23,7 +28,13 @@ def decide(body: dict) -> Action:
     else:
         win, tie, lose = (0.0, 0.0, 1.0)
 
-    adjusted_equity = win + (tie / 2.0)
+    adjusted_equity = (
+        post_reveal_multiway_equity(ctx.your_number, ctx.community_number, ctx.table_rule, ctx.live_opponent_count)
+        if not unknown and ctx.round_name == "post_reveal" and ctx.community_number is not None
+        else pre_reveal_multiway_equity(ctx.your_number, ctx.table_rule, ctx.live_opponent_count)
+        if not unknown
+        else 0.0
+    )
     percentile = _percentile(ctx, adjusted_equity, unknown)
     aggression_margin = _effective_call_margin(ctx, rule_config)
     bluff_enabled = _bluff_enabled(ctx) and not unknown
@@ -37,6 +48,11 @@ def decide(body: dict) -> Action:
         call_margin=round(aggression_margin, 4),
         bluff_enabled=bluff_enabled,
         max_commitment_fraction=rule_config.max_commitment_fraction,
+        phase=ctx.phase,
+        live_opponents=ctx.live_opponent_count,
+        multiway=ctx.is_multiway,
+        leads_table=ctx.leads_table,
+        chips_needed_to_lead=ctx.chips_needed_to_lead,
     )
 
     if ctx.round_name == "post_reveal" and ctx.community_number is not None:
@@ -47,23 +63,49 @@ def decide(body: dict) -> Action:
     return action
 
 
+def _is_phase3(ctx) -> bool:
+    """Phase is a match property. Do not infer it from who is still in this pot."""
+    if ctx.phase == 3:
+        return True
+    if ctx.phase in {1, 2}:
+        return False
+    return ctx.total_hands == 60 or len(ctx.player_deltas) >= 3
+
+
 def _effective_call_margin(ctx, rule_config: RuleConfig) -> float:
     margin = rule_config.call_equity_margin
+    if ctx.is_multiway:
+        margin += PHASE3_CONFIG.extra_call_margin_per_opponent * (ctx.live_opponent_count - 1)
     if ctx.your_stack < CONFIG.short_stack_threshold:
         margin += CONFIG.short_stack_tighten
-    hands = ctx.total_hands or PHASE2_CONFIG.hands_per_leg
-    target = PHASE2_CONFIG.target_delta if ctx.leg_number is not None else CONFIG.chase_if_below_delta
-    if ctx.hand_number / hands > 0.75 and ctx.chip_delta >= target + 10:
+    phase3 = _is_phase3(ctx)
+    hands = ctx.total_hands or (PHASE3_CONFIG.hands_per_leg if phase3 else PHASE2_CONFIG.hands_per_leg)
+    if phase3:
+        target = PHASE3_CONFIG.target_delta
+    elif ctx.leg_number is not None:
+        target = PHASE2_CONFIG.target_delta
+    else:
+        target = CONFIG.chase_if_below_delta
+    protected = ctx.chip_delta >= target + 10 and (not phase3 or ctx.leads_table)
+    if ctx.hand_number / hands > 0.75 and protected:
         margin += CONFIG.protect_lead_tighten
-    if ctx.hand_number / hands > 0.85 and ctx.chip_delta < target and ctx.your_stack > target - ctx.chip_delta:
+    needs_finish = ctx.chip_delta < target or (phase3 and not ctx.leads_table)
+    needed = max(target - ctx.chip_delta, ctx.chips_needed_to_lead) if phase3 else target - ctx.chip_delta
+    if ctx.hand_number / hands > 0.85 and needs_finish and ctx.your_stack > needed:
         margin -= CONFIG.chase_loosen
     return max(0.0, margin)
 
 
 def _bluff_enabled(ctx) -> bool:
-    hands = ctx.total_hands or PHASE2_CONFIG.hands_per_leg
-    target = PHASE2_CONFIG.target_delta if ctx.leg_number is not None else CONFIG.chase_if_below_delta
-    if ctx.hand_number / hands > 0.75 and ctx.chip_delta >= target + 10:
+    phase3 = _is_phase3(ctx)
+    hands = ctx.total_hands or (PHASE3_CONFIG.hands_per_leg if phase3 else PHASE2_CONFIG.hands_per_leg)
+    if phase3:
+        target = PHASE3_CONFIG.target_delta
+    elif ctx.leg_number is not None:
+        target = PHASE2_CONFIG.target_delta
+    else:
+        target = CONFIG.chase_if_below_delta
+    if ctx.hand_number / hands > 0.75 and ctx.chip_delta >= target + 10 and (not phase3 or ctx.leads_table):
         return False
     return True
 
@@ -74,8 +116,8 @@ def _percentile(ctx, adjusted_equity: float, unknown: bool) -> float:
     values: list[float] = []
     for number in range(1, 14):
         if ctx.round_name == "post_reveal" and ctx.community_number is not None:
-            win, tie, _ = post_reveal_equity(number, ctx.community_number, ctx.table_rule)
+            value = post_reveal_multiway_equity(number, ctx.community_number, ctx.table_rule, ctx.live_opponent_count)
         else:
-            win, tie, _ = pre_reveal_equity(number, ctx.table_rule)
-        values.append(win + tie / 2.0)
+            value = pre_reveal_multiway_equity(number, ctx.table_rule, ctx.live_opponent_count)
+        values.append(value)
     return sum(value <= adjusted_equity for value in values) / len(values)

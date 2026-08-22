@@ -43,13 +43,23 @@ class Config:
     preflop_reraise_multiplier: float = 2.5
     default_open_raise_to_bb: float = 3.0
     medium_open_raise_to_bb: float = 2.5
+    # v6 range-aware defence knobs.
+    preflop_value_reraise_equity: float = 0.75
+    postflop_value_raise_equity: float = 0.80
+    risk_extra_margin: float = 0.20
+    raise_range_decay: float = 0.60
+    min_range_fraction: float = 0.15
+    bet_range_base: float = 0.30
+    bet_range_aggro_weight: float = 0.70
+    bluff_max_opponent_aggro: float = 0.30
+    button_complete_min_percentile: float = 0.16
 
 
 @dataclass(frozen=True)
 class RuleConfig:
     open_raise_min_percentile: float = 0.55
     value_bet_min_equity: float = 0.64
-    bet_size_pot_fraction: float = 0.65
+    bet_size_pot_fraction: float = 0.85
     bluff_frequency: float = 0.18
     call_equity_margin: float = 0.04
     max_commitment_fraction: float = 0.45
@@ -77,5 +87,17 @@ class Phase2Config:
         return (self.per_rule or {}).get(codename, self.default)
 
 
+@dataclass(frozen=True)
+class Phase3Config:
+    target_delta: int = 10
+    hands_per_leg: int = 60
+    seats: int = 6
+    # A multiway showdown needs to beat every live number. These offsets make
+    # voluntary bets and calls materially tighter than heads-up play.
+    extra_call_margin_per_opponent: float = 0.035
+    extra_value_equity_per_opponent: float = 0.04
+
+
 CONFIG = Config()
 PHASE2_CONFIG = Phase2Config(recon_mode=os.getenv("SHOWDOWN_RECON_MODE", "").lower() in {"1", "true", "yes"})
+PHASE3_CONFIG = Phase3Config()

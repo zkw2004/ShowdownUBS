@@ -2,6 +2,19 @@
 
 How correctness is verified and how strategy thresholds are tuned before spending a live attempt.
 
+## Live decision tracing
+
+For a deployed Phase 2 test, set `SHOWDOWN_LOG_MOVES=true` in Render. Every
+`POST /move` then creates one `move_trace={...}` log line containing the
+deployed version, match/leg/hand identifiers, rule, cards, stack, pot,
+current-hand actions, selected decision branch, range-equity details, and
+response.
+
+Call `/health` before an attempt to confirm the deployed version. It returns
+`{"status": "ok", "version": "<short-commit>"}`. Save the trace lines with
+the replay or downloaded match JSON. The `decision` field explains why an
+action was chosen; request logs alone do not.
+
 ---
 
 ## 1. Why a local simulator is mandatory

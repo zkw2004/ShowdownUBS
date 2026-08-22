@@ -1,76 +1,145 @@
 from __future__ import annotations
 
-from showdown.config import PHASE2_CONFIG, RuleConfig
+from showdown.config import CONFIG, PHASE2_CONFIG, RuleConfig
+from showdown.equity import pre_reveal_multiway_equity_vs_range
 from showdown.models import Action, Context
-from showdown.strategy.sizing import call_or_check, raise_action
+from showdown.strategy.sizing import call_or_check, multiple_of_amount_raise, raise_action
+from showdown.strategy.state import ATTEMPT_STATE
 from showdown.strategy.trace import mark
 
 
 def decide_preflop(ctx: Context, adjusted_equity: float, percentile: float, rule_config: RuleConfig, unknown: bool) -> Action:
-    # The opponent's repeated pre-reveal raises identify a much stronger range
-    # than the uniform opponent used by our equity table.  Never let an open
-    # raise turn into a stack-threatening pre-reveal guessing contest.
-    risk_fraction = ctx.to_call / max(ctx.your_stack, 1)
-    if ctx.to_call > 0 and risk_fraction > 0.12 and ctx.can_fold:
-        mark(ctx, "preflop_risk_cap_fold", risk_fraction=round(risk_fraction, 4))
-        return Action("fold")
     opponent_raises = _opponent_pre_reveal_raise_count(ctx)
-    if opponent_raises:
-        # A single normal open is worth defending with a genuinely strong
-        # number.  A second opponent raise is a raising war: exit it.
-        if opponent_raises == 1 and risk_fraction <= 0.08 and adjusted_equity >= 0.70 and ctx.can_call:
-            mark(ctx, "preflop_raise_value_call", risk_fraction=round(risk_fraction, 4))
-            return Action("call")
-        mark(ctx, "preflop_raise_fold", risk_fraction=round(risk_fraction, 4), opponent_raises=opponent_raises)
-        return Action("fold")
+    if ctx.to_call > 0 and opponent_raises:
+        if unknown:
+            return _unknown_call_or_fold(ctx)
+        return _respond_to_raise(ctx, opponent_raises, rule_config)
 
-    is_button = ctx.your_seat == ctx.button_seat
-    if is_button:
-        return _decide_button(ctx, adjusted_equity, percentile, rule_config, unknown)
-    return _decide_big_blind(ctx, adjusted_equity, percentile, rule_config, unknown)
-
-
-def _decide_button(ctx: Context, adjusted_equity: float, percentile: float, rule_config: RuleConfig, unknown: bool) -> Action:
-    if ctx.to_call <= ctx.big_blind:
-        if not unknown and percentile >= rule_config.open_raise_min_percentile + 0.20:
-            return raise_action(ctx, int(round(3.0 * ctx.big_blind)))
-        if not unknown and percentile >= rule_config.open_raise_min_percentile:
-            return raise_action(ctx, int(round(2.5 * ctx.big_blind)), prefer_call=True)
-        return call_or_check(ctx)
-
-    commit_fraction = ctx.to_call / max(ctx.your_stack, 1)
     if unknown:
+        if ctx.to_call == 0:
+            return Action("check")
         return _unknown_call_or_fold(ctx)
-    if percentile >= 0.92 and commit_fraction <= rule_config.max_commitment_fraction:
-        target = max(ctx.min_raise_to or 0, int(round((ctx.my_bet_this_round + ctx.to_call) * 2.5)))
-        return raise_action(ctx, target)
-    if percentile >= rule_config.open_raise_min_percentile and commit_fraction <= rule_config.max_commitment_fraction:
-        return Action("call") if ctx.can_call else Action("fold")
-    if ctx.to_call <= ctx.big_blind and ctx.can_call:
+
+    return _decide_first_in(ctx, percentile, rule_config)
+
+
+def _respond_to_raise(ctx: Context, opponent_raises: int, rule_config: RuleConfig) -> Action:
+    # Estimate the raiser's range from their observed raise frequency instead
+    # of assuming strength: an opponent who raises most hands has a range close
+    # to uniform, and folding medium numbers to them forfeits the pot odds.
+    aggressor = _latest_pre_reveal_raiser(ctx)
+    freq = ATTEMPT_STATE.opponent.pre_raise_freq(aggressor)
+    range_fraction = max(
+        CONFIG.min_range_fraction,
+        freq * (CONFIG.raise_range_decay ** (opponent_raises - 1)),
+    )
+    equity = pre_reveal_multiway_equity_vs_range(
+        ctx.your_number, ctx.table_rule, range_fraction, ctx.live_opponent_count
+    )
+    risk_fraction = ctx.to_call / max(ctx.your_stack, 1)
+    required = ctx.adjusted_pot_odds + rule_config.call_equity_margin + CONFIG.risk_extra_margin * risk_fraction
+    detail = dict(
+        opponent_raises=opponent_raises,
+        live_opponents=ctx.live_opponent_count,
+        aggressor_seat=aggressor,
+        raise_freq=round(freq, 3),
+        range_fraction=round(range_fraction, 3),
+        range_equity=round(equity, 4),
+        required_equity=round(required, 4),
+        risk_fraction=round(risk_fraction, 4),
+    )
+
+    if ctx.to_call >= ctx.your_stack:
+        if equity >= max(required, CONFIG.all_in_equity_threshold) and ctx.can_call:
+            mark(ctx, "preflop_allin_call", **detail)
+            return Action("call")
+        mark(ctx, "preflop_allin_fold", **detail)
+        return Action("fold") if ctx.can_fold else call_or_check(ctx)
+
+    if equity >= CONFIG.preflop_value_reraise_equity and ctx.can_raise:
+        # Multiway 3-bets have to get through every remaining seat. Only
+        # isolate when heads-up, or when the number is effectively the nuts.
+        if ctx.live_opponent_count <= 1 or equity >= 0.90:
+            mark(ctx, "preflop_value_reraise", **detail)
+            return multiple_of_amount_raise(
+                ctx,
+                ctx.my_bet_this_round + ctx.to_call,
+                CONFIG.preflop_reraise_multiplier,
+                cap_fraction_of_stack=rule_config.max_commitment_fraction,
+            )
+    if equity >= required and ctx.can_call:
+        mark(ctx, "preflop_raise_call", **detail)
         return Action("call")
-    return Action("fold")
+    if ctx.can_fold:
+        mark(ctx, "preflop_raise_fold", **detail)
+        return Action("fold")
+    return call_or_check(ctx)
 
 
-def _decide_big_blind(ctx: Context, adjusted_equity: float, percentile: float, rule_config: RuleConfig, unknown: bool) -> Action:
+def _decide_first_in(ctx: Context, percentile: float, rule_config: RuleConfig) -> Action:
+    """Open, complete, or fold when nobody has raised.
+
+    v1 routed every non-button seat through the raise-defence path, so UTG/MP/CO
+    treated the posted blinds as a raise and folded playable numbers. That is
+    why a six-seat bot only ever printed chips from the button.
+    """
+    position = _position_name(ctx)
     if ctx.to_call == 0:
-        if not unknown and percentile >= rule_config.open_raise_min_percentile + 0.15:
-            return raise_action(ctx, int(round(3.0 * ctx.big_blind)))
+        if percentile >= rule_config.open_raise_min_percentile + 0.15:
+            mark(ctx, "preflop_bb_iso", position=position)
+            return raise_action(ctx, int(round(CONFIG.default_open_raise_to_bb * ctx.big_blind)))
         return Action("check")
 
-    raise_size_bb = (ctx.my_bet_this_round + ctx.to_call) / max(ctx.big_blind, 1)
-    commit_fraction = ctx.to_call / max(ctx.your_stack, 1)
-    if unknown:
-        return _unknown_call_or_fold(ctx)
-    if percentile >= 0.95 and commit_fraction <= rule_config.max_commitment_fraction:
-        target = int(round((ctx.my_bet_this_round + ctx.to_call) * 2.5))
-        return raise_action(ctx, target)
-    if percentile >= rule_config.open_raise_min_percentile:
-        return Action("call") if ctx.can_call else Action("fold")
-    if percentile >= 0.30 and raise_size_bb <= 4.0:
-        return Action("call") if ctx.can_call else Action("fold")
-    if adjusted_equity > ctx.adjusted_pot_odds + 0.02 and commit_fraction <= 0.05 and ctx.can_call:
-        return Action("call")
-    return Action("fold")
+    open_need = {
+        "ep": rule_config.open_raise_min_percentile + 0.20,
+        "mp": rule_config.open_raise_min_percentile + 0.10,
+        "co": rule_config.open_raise_min_percentile,
+        "btn": rule_config.open_raise_min_percentile,
+        "sb": rule_config.open_raise_min_percentile + 0.08,
+        "bb": rule_config.open_raise_min_percentile + 0.15,
+    }[position]
+    if percentile >= open_need + 0.20:
+        mark(ctx, "preflop_open_raise", position=position)
+        return raise_action(ctx, int(round(CONFIG.default_open_raise_to_bb * ctx.big_blind)))
+    if percentile >= open_need:
+        mark(ctx, "preflop_open_raise", position=position)
+        return raise_action(ctx, int(round(CONFIG.medium_open_raise_to_bb * ctx.big_blind)), prefer_call=True)
+    if percentile <= CONFIG.button_complete_min_percentile and ctx.can_fold:
+        mark(ctx, "preflop_first_in_fold", position=position)
+        return Action("fold")
+    if position in {"btn", "sb", "co"} or ctx.to_call <= ctx.big_blind:
+        mark(ctx, "preflop_complete", position=position)
+        return call_or_check(ctx)
+    if ctx.can_fold:
+        mark(ctx, "preflop_first_in_fold", position=position)
+        return Action("fold")
+    return call_or_check(ctx)
+
+
+def _position_name(ctx: Context) -> str:
+    seats = sorted(
+        int(player.get("seat", -1))
+        for player in (ctx.raw.get("players") or [])
+        if not bool(player.get("busted", False)) and int(player.get("seat", -1)) >= 0
+    )
+    if len(seats) <= 2:
+        return "btn" if ctx.your_seat == ctx.button_seat else "bb"
+    if ctx.button_seat not in seats or ctx.your_seat not in seats:
+        return "mp"
+    offset = (seats.index(ctx.your_seat) - seats.index(ctx.button_seat)) % len(seats)
+    if offset == 0:
+        return "btn"
+    if offset == 1:
+        return "sb"
+    if offset == 2:
+        return "bb"
+    from_utg = offset - 3
+    late = len(seats) - 3
+    if from_utg <= 0:
+        return "ep"
+    if from_utg >= late - 1:
+        return "co"
+    return "mp"
 
 
 def _unknown_call_or_fold(ctx: Context) -> Action:
@@ -91,3 +160,15 @@ def _opponent_pre_reveal_raise_count(ctx: Context) -> int:
         and action.get("seat") != ctx.your_seat
         and action.get("action") == "raise"
     )
+
+
+def _latest_pre_reveal_raiser(ctx: Context) -> int | None:
+    for action in reversed(ctx.raw.get("current_hand_actions") or []):
+        if (
+            isinstance(action, dict)
+            and action.get("round") == "pre_reveal"
+            and action.get("seat") != ctx.your_seat
+            and action.get("action") == "raise"
+        ):
+            return int(action.get("seat", -1))
+    return None

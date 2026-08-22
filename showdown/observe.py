@@ -123,6 +123,7 @@ def _move_trace(body: dict[str, Any], response: dict[str, Any]) -> dict[str, Any
     players = body.get("players") or []
     return {
         "match_id": body.get("match_id"),
+        "phase": body.get("phase"),
         "leg": body.get("leg_number"),
         "rule": body.get("table_rule"),
         "hand": body.get("hand_number"),

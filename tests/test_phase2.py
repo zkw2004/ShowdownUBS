@@ -54,12 +54,12 @@ def test_extract_reads_phase2_leg_log_schema() -> None:
     assert extract(match) == [Showdown("obsidian", 1, 1, 4, {0: 2, 1: 7}, (1,))]
 
 
-def test_large_post_reveal_reraise_never_commits_a_large_fraction_of_stack() -> None:
+def test_large_post_reveal_reraise_is_folded_with_a_mediocre_hand() -> None:
     body = cloned_request()
     body.update({
         "table_rule": "standard",
         "round": "post_reveal",
-        "your_number": 11,
+        "your_number": 9,
         "community_number": 12,
         "pot": 84,
         "to_call": 104,
@@ -69,6 +69,23 @@ def test_large_post_reveal_reraise_never_commits_a_large_fraction_of_stack() -> 
         "max_raise_to": 169,
     })
     assert decide(body).action == "fold"
+
+
+def test_large_post_reveal_reraise_is_not_folded_with_the_nuts() -> None:
+    body = cloned_request()
+    body.update({
+        "table_rule": "standard",
+        "round": "post_reveal",
+        "your_number": 12,
+        "community_number": 12,
+        "pot": 84,
+        "to_call": 104,
+        "your_stack": 169,
+        "legal_actions": ["fold", "call", "raise"],
+        "min_raise_to": 169,
+        "max_raise_to": 169,
+    })
+    assert decide(body).action in {"call", "raise"}
 
 
 def test_post_reveal_opponent_raise_is_not_reraised() -> None:
@@ -90,15 +107,18 @@ def test_post_reveal_opponent_raise_is_not_reraised() -> None:
     assert decide(body).action == "call"
 
 
-def test_pre_reveal_reraise_war_is_folded_before_large_commitment() -> None:
+def _pre_reveal_war_body(number: int) -> dict:
     body = cloned_request()
     body.update({
         "table_rule": "standard",
         "round": "pre_reveal",
-        "your_number": 13,
+        "community_number": None,
+        "your_number": number,
         "to_call": 19,
         "your_stack": 223,
         "pot": 43,
+        "min_raise_to": 50,
+        "max_raise_to": 223,
         "legal_actions": ["fold", "call", "raise"],
         "current_hand_actions": [
             {"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 5},
@@ -106,59 +126,30 @@ def test_pre_reveal_reraise_war_is_folded_before_large_commitment() -> None:
             {"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 31},
         ],
     })
-    assert decide(body).action == "fold"
+    return body
 
 
-def test_facing_a_post_reveal_bet_does_not_inflate_then_fold() -> None:
-    """Hand 1 of the scored attempt: 12 vs 7, Axl bets 21, we raised to 52, folded the jam."""
-    body = cloned_request()
-    body.update({
-        "table_rule": "verdigris",
-        "round": "post_reveal",
-        "your_number": 12,
-        "community_number": 7,
-        "pot": 53,
-        "to_call": 21,
-        "your_stack": 184,
-        "min_raise_to": 42,
-        "max_raise_to": 184,
-        "legal_actions": ["fold", "call", "raise"],
-        "current_hand_actions": [
-            {"seat": 0, "round": "pre_reveal", "action": "raise", "amount": 6},
-            {"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 16},
-            {"seat": 0, "round": "pre_reveal", "action": "call", "amount": 16},
-            {"seat": 1, "round": "post_reveal", "action": "bet", "amount": 21},
-        ],
-    })
-    assert decide(body).action == "call"
+def test_pre_reveal_reraise_war_is_folded_with_a_medium_number() -> None:
+    assert decide(_pre_reveal_war_body(8)).action == "fold"
 
 
-def test_pair_calls_a_short_stack_jam() -> None:
-    body = cloned_request()
-    body.update({
-        "table_rule": "standard",
-        "round": "post_reveal",
-        "your_number": 12,
-        "community_number": 12,
-        "pot": 94,
-        "to_call": 42,
-        "your_stack": 150,
-        "legal_actions": ["fold", "call", "raise"],
-        "min_raise_to": 84,
-        "max_raise_to": 150,
-    })
-    assert decide(body).action == "call"
+def test_pre_reveal_reraise_war_is_continued_with_the_top_number() -> None:
+    assert decide(_pre_reveal_war_body(13)).action in {"call", "raise"}
 
 
-def test_strong_hand_defends_a_single_small_pre_reveal_raise() -> None:
+def test_strong_hand_reraises_a_single_small_pre_reveal_raise() -> None:
     body = cloned_request()
     body.update({
         "table_rule": "standard",
         "round": "pre_reveal",
+        "community_number": None,
         "your_number": 13,
         "to_call": 3,
         "your_stack": 200,
+        "pot": 7,
+        "min_raise_to": 8,
+        "max_raise_to": 200,
         "legal_actions": ["fold", "call", "raise"],
         "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 5}],
     })
-    assert decide(body).action == "call"
+    assert decide(body).action == "raise"

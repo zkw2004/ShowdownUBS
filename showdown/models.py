@@ -37,9 +37,12 @@ class Context:
     leg_number: int | None
     total_legs: int | None
     match_id: str | None
+    phase: int | None
     chip_delta: int
     my_bet_this_round: int
     acting_last: bool
+    live_opponent_seats: tuple[int, ...]
+    player_deltas: tuple[tuple[int, int], ...]
 
     @property
     def adjusted_pot_odds(self) -> float:
@@ -64,6 +67,27 @@ class Context:
     def can_fold(self) -> bool:
         return "fold" in self.legal_actions
 
+    @property
+    def live_opponent_count(self) -> int:
+        return len(self.live_opponent_seats)
+
+    @property
+    def is_multiway(self) -> bool:
+        return self.live_opponent_count >= 2
+
+    @property
+    def highest_other_delta(self) -> int:
+        others = [delta for seat, delta in self.player_deltas if seat != self.your_seat]
+        return max(others, default=self.chip_delta)
+
+    @property
+    def leads_table(self) -> bool:
+        return self.chip_delta > self.highest_other_delta
+
+    @property
+    def chips_needed_to_lead(self) -> int:
+        return max(0, self.highest_other_delta - self.chip_delta + 1)
+
 
 def parse_context(body: dict[str, Any]) -> Context:
     players = body.get("players") or []
@@ -71,11 +95,23 @@ def parse_context(body: dict[str, Any]) -> Context:
     button_seat = int(body.get("button_seat", 0) or 0)
     round_name = body.get("round") or "pre_reveal"
     is_button = your_seat == button_seat
-    acting_last = (not is_button) if round_name == "pre_reveal" else is_button
+    acting_last = _acting_last(players, your_seat, button_seat, round_name, is_button)
 
     my_player = _find_my_player(players, your_seat)
     chip_delta = int((my_player or {}).get("chip_delta", body.get("your_stack", 0) or 0) or 0)
     my_bet_this_round = int((my_player or {}).get("bet_this_round", 0) or 0)
+    live_opponent_seats = tuple(
+        int(player.get("seat", -1))
+        for player in players
+        if int(player.get("seat", -1)) != your_seat
+        and not bool(player.get("folded", False))
+        and not bool(player.get("busted", False))
+    )
+    player_deltas = tuple(
+        (int(player.get("seat", -1)), int(player.get("chip_delta", 0) or 0))
+        for player in players
+        if not bool(player.get("busted", False))
+    )
 
     return Context(
         raw=body,
@@ -97,9 +133,12 @@ def parse_context(body: dict[str, Any]) -> Context:
         leg_number=_optional_int(body.get("leg_number")),
         total_legs=_optional_int(body.get("total_legs")),
         match_id=_optional_str(body.get("match_id")),
+        phase=_optional_int(body.get("phase")),
         chip_delta=chip_delta,
         my_bet_this_round=my_bet_this_round,
         acting_last=acting_last,
+        live_opponent_seats=live_opponent_seats,
+        player_deltas=player_deltas,
     )
 
 
@@ -108,6 +147,30 @@ def _find_my_player(players: list[dict[str, Any]], your_seat: int) -> dict[str, 
         if player.get("name") == "you" or player.get("seat") == your_seat:
             return player
     return None
+
+
+def _acting_last(
+    players: list[dict[str, Any]], your_seat: int, button_seat: int, round_name: str, is_button: bool
+) -> bool:
+    """Return positional last-to-act for heads-up and multiway tables.
+
+    Busted seats are skipped when finding the small and big forced bets. A
+    folded player is still part of the original order but can no longer be the
+    player receiving a decision, so it does not affect whether *we* occupy the
+    positional last seat.
+    """
+    live_seats = sorted(
+        int(player.get("seat", -1)) for player in players if not bool(player.get("busted", False)) and int(player.get("seat", -1)) >= 0
+    )
+    if len(live_seats) <= 2:
+        return (not is_button) if round_name == "pre_reveal" else is_button
+    if button_seat not in live_seats:
+        return False
+    button_index = live_seats.index(button_seat)
+    if round_name == "post_reveal":
+        return your_seat == button_seat
+    big_blind_seat = live_seats[(button_index + 2) % len(live_seats)]
+    return your_seat == big_blind_seat
 
 
 def _optional_int(value: Any) -> int | None:

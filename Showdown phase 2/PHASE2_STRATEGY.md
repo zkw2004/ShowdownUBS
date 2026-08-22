@@ -4,6 +4,74 @@ Strategy adaptations for Phase 2. Everything in `STRATEGY.md` still applies stru
 
 Read `PHASE2_SPEC.md` for scope and `RULE_INFERENCE.md` for how rules get decoded.
 
+## Current implemented policy
+
+This section documents the policy now implemented in the bot. The remaining
+sections retain the broader Phase 2 rationale and future tuning plan.
+
+### Rule-aware range equity
+
+When facing an opponent bet or raise on a solved rule, the bot calculates
+exact win/tie/loss equity against the strongest fraction of possible opponent
+numbers rather than treating the opponent as uniformly random.
+
+- Pre-reveal strength is the exact pre-reveal equity under the active rule.
+- Post-reveal strength is the rank under the revealed community number.
+- The requested fraction becomes one to thirteen discrete numbers and is
+  cached, so the calculation remains fast on `/move`.
+
+The opponent's observed pre-reveal raise frequency sets the initial range
+width. A second raise narrows it by `raise_range_decay` (0.60). Post-reveal
+range width starts at 30% and widens with the same aggression estimate; a
+raise over our own bet narrows it by the same decay.
+
+### Opponent model
+
+`OpponentModel` records whether the opponent raised pre-reveal in every hand.
+It uses a beta-style prior of 2 raises in 4 hands, so the first live hand does
+not classify the opponent as extremely loose or tight. The model persists
+through all four legs of one attempt and resets for a new match, after the
+`-legN` suffix is removed from its match ID.
+
+Pre-reveal raise frequency is the only directly measured behavioural signal.
+The implementation currently uses it as a practical post-reveal aggression
+proxy as well.
+
+### Pre-reveal policy
+
+- With no raise in front, actions use rule-relative equity percentile. Strong
+  hands open to 3 big blinds; medium hands open to 2.5 big blinds; the bottom
+  16% of button hands fold rather than complete.
+- Facing a raise, the bot calls only if range equity clears pot odds, the
+  rule's call margin, and a stack-risk margin.
+- It re-raises at range equity of at least 0.75. Re-raises are capped by the
+  rule's maximum commitment fraction (currently 45% of stack).
+- It calls an all-in only when range equity clears both the calculated
+  requirement and the all-in threshold (currently 0.60).
+
+### Post-reveal policy
+
+- When checked to, strong hands bet at equity at least
+  `max(value threshold + 0.10, 0.74)`; medium hands bet only in position.
+- Strong value bets use 85% pot. Medium value bets use 60% of that amount.
+- Bluffs require position, low equity, enabled bluffing, and an aggression
+  proxy below 0.30.
+- Facing chips, range equity is compared with pot odds, the aggression margin,
+  and a stack-risk margin. At equity at least 0.80, the bot value-raises;
+  otherwise it calls or folds according to the required equity. Value raises
+  respect the same commitment cap.
+
+### Unknown-rule fallback and tracing
+
+For an unregistered codename, the bot checks when free and otherwise calls
+only up to 6 chips and below 5% of its stack. `SHOWDOWN_RECON_MODE=true` raises
+that information-gathering cap to 10% of stack.
+
+Set `SHOWDOWN_LOG_MOVES=true` in Render to produce a `move_trace` JSON record
+for every decision. It includes the deployed version, game state, range-equity
+details, decision branch, and returned action. `/health` returns the same
+short deployed version.
+
 ---
 
 ## 1. The central shift
@@ -125,7 +193,7 @@ Also handle `leg_number is None` (single-match phases) so the same code path ser
 
 | State | Action on new leg |
 |-------|------------------|
-| Opponent model | Reset **or** carry (see 4.3) |
+| Opponent model | Carry within an attempt; reset for a new attempt |
 | Rule survivor set | **Reset.** Different rule, different codename. |
 | Per-leg chip tracking | Reset |
 | Bluff RNG | Fine to carry |
@@ -135,12 +203,14 @@ Also handle `leg_number is None` (single-match phases) so the same code path ser
 
 > "The same opponent plays all four legs, under the same name, and plays the same way throughout."
 
-This is explicit and exploitable. Behavioural statistics gathered in leg 1 apply in legs 2, 3 and 4:
+This is explicit and exploitable. The current implementation carries one
+behavioural statistic from leg 1 into legs 2, 3 and 4:
 
-- fold-to-bet frequency
-- aggression ratio
-- bet sizing patterns
-- willingness to continue without a strong hand
+- whether the opponent made at least one pre-reveal raise in a hand
+
+This is smoothed into a pre-reveal raise frequency and is reused as the
+post-reveal aggression proxy. Future extensions can add direct post-reveal
+bet, raise, and fold statistics.
 
 **But be careful about what "the same way" means.** They play the same *strategy*, and they play each rule correctly. So their observable behaviour will differ between legs because the rule differs, even though the underlying policy is constant.
 
@@ -208,7 +278,7 @@ Starting values for the +25-in-40 target, to be tuned:
 default = RuleConfig(
     open_raise_min_percentile = 0.55,   # looser than Phase 1
     value_bet_min_equity      = 0.64,   # thinner than Phase 1's 0.70
-    bet_size_pot_fraction     = 0.65,
+    bet_size_pot_fraction     = 0.85,
     bluff_frequency           = 0.18,
     call_equity_margin        = 0.04,   # tighter margin, more calls
     max_commitment_fraction   = 0.45,
@@ -225,6 +295,19 @@ unknown_mode = RuleConfig(
 ```
 
 **Tune per rule.** A rule that flattens the equity distribution needs completely different cutoffs from one that sharpens it. Do not assume one config transfers.
+
+Shared range-defence settings currently in use:
+
+```python
+preflop_value_reraise_equity   = 0.75
+postflop_value_raise_equity    = 0.80
+risk_extra_margin              = 0.20
+raise_range_decay              = 0.60
+min_range_fraction             = 0.15
+bet_range_base                 = 0.30
+bet_range_aggro_weight         = 0.70
+button_complete_min_percentile = 0.16
+```
 
 ---
 

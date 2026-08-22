@@ -14,11 +14,14 @@ app = FastAPI()
 # may inherit a WARNING-only root logger and silently discard move traces.
 logger = logging.getLogger("uvicorn.error")
 LOG_MOVES = os.getenv("SHOWDOWN_LOG_MOVES", "1").lower() not in {"0", "false", "no"}
+# Render exports the deployed commit.  Surfacing it on /health is the only way
+# to tell a live deploy from a stale one before a match starts.
+VERSION = (os.getenv("RENDER_GIT_COMMIT") or "dev")[:8]
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": VERSION}
 
 
 @app.post("/move")

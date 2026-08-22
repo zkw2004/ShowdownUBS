@@ -98,6 +98,24 @@ class Context:
     def chips_needed_to_lead(self) -> int:
         return max(0, self.highest_other_delta - self.chip_delta + 1)
 
+    @property
+    def is_phase3(self) -> bool:
+        """Phase is a match property. Do not infer it from who is still in this pot."""
+        if self.phase == 3:
+            return True
+        if self.phase in {1, 2}:
+            return False
+        return self.total_hands == 60 or len(self.player_deltas) >= 3
+
+    @property
+    def lead_margin(self) -> int:
+        return self.chip_delta - self.highest_other_delta
+
+    @property
+    def progress(self) -> float:
+        hands = max(self.total_hands, 1)
+        return min(1.0, max(0.0, self.hand_number / hands))
+
 
 def parse_context(body: dict[str, Any]) -> Context:
     players = body.get("players") or []

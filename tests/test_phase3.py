@@ -196,4 +196,124 @@ def test_twelve_calls_a_small_open_instead_of_folding() -> None:
             "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 10}],
         }
     )
+    assert decide(body).action in {"call", "raise"}
+
+
+def test_nine_calls_a_small_open_with_players_still_to_act() -> None:
+    """Live leak: a 9 was assigned 8% equity because a seat that had not acted
+    was priced as if it already held the raiser's range."""
+    body = _six_seat_body()
+    body.update(
+        {
+            "table_rule": "cinnabar",
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_number": 9,
+            "your_seat": 0,
+            "button_seat": 4,
+            "to_call": 5,
+            "pot": 9,
+            "your_stack": 414,
+            "min_raise_to": 10,
+            "max_raise_to": 414,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [{"seat": 4, "round": "pre_reveal", "action": "raise", "amount": 6}],
+            "players": [
+                {"seat": 0, "name": "you", "chip_delta": 215, "stack": 414, "busted": False, "folded": False, "bet_this_round": 1},
+                {"seat": 1, "name": "Dana", "chip_delta": 29, "stack": 227, "busted": False, "folded": False, "bet_this_round": 2},
+                {"seat": 2, "name": "Miles", "chip_delta": -200, "stack": 0, "busted": True, "folded": True, "bet_this_round": 0},
+                {"seat": 3, "name": "Theo", "chip_delta": -200, "stack": 0, "busted": True, "folded": True, "bet_this_round": 0},
+                {"seat": 4, "name": "Rhea", "chip_delta": 381, "stack": 575, "busted": False, "folded": False, "bet_this_round": 6},
+                {"seat": 5, "name": "Bram", "chip_delta": -200, "stack": 0, "busted": True, "folded": True, "bet_this_round": 0},
+            ],
+        }
+    )
+    assert decide(body).action in {"call", "raise"}
+
+
+def test_ten_calls_an_overjam_when_pot_odds_are_good() -> None:
+    """Live leak: 50% equity into a 30% pot was folded by an all-in 0.60 floor."""
+    body = cloned_request()
+    body.update(
+        {
+            "phase": 3,
+            "table_rule": "verdigris",
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_number": 10,
+            "to_call": 842,
+            "pot": 846,
+            "your_stack": 354,
+            "legal_actions": ["fold", "call"],
+            "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 844}],
+            "players": [
+                {"seat": 0, "name": "you", "chip_delta": 154, "stack": 354, "busted": False, "folded": False},
+                {"seat": 1, "name": "Bram", "chip_delta": 489, "stack": 842, "busted": False, "folded": False},
+            ],
+        }
+    )
     assert decide(body).action == "call"
+
+
+def test_amaranth_thirteen_calls_a_small_open() -> None:
+    body = _six_seat_body()
+    body.update(
+        {
+            "table_rule": "amaranth",
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_number": 13,
+            "to_call": 9,
+            "pot": 14,
+            "your_stack": 200,
+            "min_raise_to": 16,
+            "max_raise_to": 200,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [{"seat": 2, "round": "pre_reveal", "action": "raise", "amount": 11}],
+        }
+    )
+    assert decide(body).action in {"call", "raise"}
+
+
+def test_obsidian_opens_the_low_number_and_folds_the_high_number() -> None:
+    body = _six_seat_body()
+    body.update(
+        {
+            "table_rule": "obsidian",
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_seat": 3,
+            "button_seat": 0,
+            "pot": 3,
+            "to_call": 2,
+            "min_raise_to": 4,
+            "max_raise_to": 200,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [],
+            "players": [
+                {"seat": 0, "name": "Dana", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+                {"seat": 1, "name": "Miles", "chip_delta": 0, "bet_this_round": 1, "busted": False},
+                {"seat": 2, "name": "Theo", "chip_delta": 0, "bet_this_round": 2, "busted": False},
+                {"seat": 3, "name": "you", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+                {"seat": 4, "name": "Rhea", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+                {"seat": 5, "name": "Bram", "chip_delta": 0, "bet_this_round": 0, "busted": False},
+            ],
+        }
+    )
+    low = dict(body)
+    low["your_number"] = 1
+    high = dict(body)
+    high["your_number"] = 13
+    assert decide(low).action == "raise"
+    assert decide(high).action == "fold"
+
+
+def test_strategy_code_does_not_hardcode_opponent_names() -> None:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "showdown"
+    forbidden = ("Dana", "Miles", "Theo", "Rhea", "Bram")
+    for path in root.rglob("*.py"):
+        text = path.read_text()
+        for name in forbidden:
+            assert name not in text, f"{path} hardcodes {name}"

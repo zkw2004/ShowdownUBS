@@ -2,21 +2,20 @@ from __future__ import annotations
 
 from showdown.config import CONFIG, PHASE2_CONFIG, PHASE3_CONFIG, RuleConfig
 from showdown.models import Action, Context
-from showdown.equity import post_reveal_multiway_equity_vs_range
+from showdown.strategy.profiles import SeatProfile
 from showdown.strategy.sizing import call_or_check, fraction_of_pot_raise
-from showdown.strategy.state import ATTEMPT_STATE
 from showdown.strategy.trace import mark
 
 
 def decide_postflop(
     ctx: Context,
-    win: float,
-    tie: float,
-    adjusted_equity: float,
-    aggression_margin: float,
+    share: float,
     bluff_enabled: bool,
+    edge: float,
     rule_config: RuleConfig,
     unknown: bool,
+    profiles: dict[int, SeatProfile],
+    ranges: dict[int, tuple[int, ...]],
 ) -> Action:
     if unknown:
         action = _unknown_action(ctx)
@@ -24,35 +23,35 @@ def decide_postflop(
         return action
 
     aggressor = _latest_post_reveal_aggressor(ctx)
-    aggro = ATTEMPT_STATE.opponent.pre_raise_freq(aggressor)
+    fold_rate = profiles.get(aggressor, SeatProfile()).fold_to_bet if aggressor is not None else 0.4
 
     if ctx.to_call == 0:
-        return _decide_unraised(ctx, adjusted_equity, bluff_enabled, aggro, rule_config)
-    return _decide_facing_chips(ctx, aggression_margin, aggro, rule_config, aggressor)
+        return _decide_unraised(ctx, share, bluff_enabled, fold_rate, rule_config)
+    return _decide_facing_chips(ctx, share, edge, ranges)
 
 
-def _decide_unraised(ctx: Context, adjusted_equity: float, bluff_enabled: bool, aggro: float, rule_config: RuleConfig) -> Action:
-    multiway_offset = PHASE3_CONFIG.extra_value_equity_per_opponent * max(0, ctx.live_opponent_count - 1)
-    value_min = rule_config.value_bet_min_equity + multiway_offset
-    if adjusted_equity >= max(value_min + 0.10, 0.74):
+def _decide_unraised(
+    ctx: Context, share: float, bluff_enabled: bool, fold_rate: float, rule_config: RuleConfig
+) -> Action:
+    value_min = rule_config.value_bet_min_equity
+    if ctx.is_multiway:
+        value_min += PHASE3_CONFIG.extra_value_equity_per_opponent * max(0, ctx.live_opponent_count - 1)
+    if share >= max(value_min + 0.08, 0.70):
         mark(ctx, "strong_value_bet")
         return fraction_of_pot_raise(ctx, rule_config.bet_size_pot_fraction)
-    if adjusted_equity >= value_min:
-        if ctx.acting_last:
+    if share >= value_min or (share >= 0.46 and ctx.acting_last and not ctx.is_multiway):
+        if ctx.acting_last or share >= value_min + 0.06:
             mark(ctx, "medium_value_bet")
             return fraction_of_pot_raise(ctx, rule_config.bet_size_pot_fraction * 0.6, prefer_call=True)
-        # Out of position a check invites the aggressive opponent's bet; the
-        # facing-chips logic then decides with their action already on record.
         mark(ctx, "medium_value_check")
         return Action("check")
     if (
-        adjusted_equity < CONFIG.low_equity_bluff_threshold
+        share < CONFIG.low_equity_bluff_threshold
         and bluff_enabled
         and ctx.acting_last
-        and aggro < CONFIG.bluff_max_opponent_aggro
+        and fold_rate >= 0.42
+        and not ctx.is_multiway
     ):
-        # Only bluff opponents who have shown they can fold; an opponent who
-        # raises most hands calls (or raises) most bets, so bluffing burns chips.
         mark(ctx, "bluff_bet")
         return fraction_of_pot_raise(
             ctx,
@@ -64,53 +63,26 @@ def _decide_unraised(ctx: Context, adjusted_equity: float, bluff_enabled: bool, 
     return Action("check")
 
 
-def _decide_facing_chips(
-    ctx: Context, aggression_margin: float, aggro: float, rule_config: RuleConfig, aggressor: int | None
-) -> Action:
-    # Width of the opponent's betting range scales with their observed
-    # aggression; a raise over our own bet narrows it further.
-    raised_over_us = _opponent_raised_post_reveal(ctx)
-    range_fraction = CONFIG.bet_range_base + CONFIG.bet_range_aggro_weight * aggro
-    if raised_over_us:
-        range_fraction *= CONFIG.raise_range_decay
-    range_fraction = max(CONFIG.min_range_fraction, min(1.0, range_fraction))
-
-    equity = post_reveal_multiway_equity_vs_range(
-        ctx.your_number,
-        ctx.community_number or 1,
-        ctx.table_rule,
-        range_fraction,
-        ctx.live_opponent_count,
-    )
-    risk_fraction = ctx.risk_fraction
-    required = ctx.adjusted_pot_odds + aggression_margin + CONFIG.risk_extra_margin * risk_fraction
-    if ctx.chips_needed_to_lead > 80:
-        required = max(0.0, required - 0.08)
+def _decide_facing_chips(ctx: Context, share: float, edge: float, ranges: dict[int, tuple[int, ...]]) -> Action:
+    required = ctx.adjusted_pot_odds + edge
+    extra = edge
+    if ctx.effective_call >= ctx.your_stack:
+        extra = 0.04 if ctx.leads_table and ctx.progress > 0.75 and ctx.lead_margin >= 30 else 0.0
+        required = ctx.adjusted_pot_odds + extra
     detail = dict(
-        raised_over_us=raised_over_us,
         live_opponents=ctx.live_opponent_count,
-        aggressor_seat=aggressor,
-        raise_freq=round(aggro, 3),
-        range_fraction=round(range_fraction, 3),
-        range_equity=round(equity, 4),
+        committed_opponents=len(ranges),
+        range_equity=round(share, 4),
         required_equity=round(required, 4),
-        risk_fraction=round(risk_fraction, 4),
+        risk_fraction=round(ctx.risk_fraction, 4),
+        pot_odds=round(ctx.adjusted_pot_odds, 4),
     )
 
-    if equity >= 0.72 and ctx.can_call:
+    if share >= 0.70 and ctx.can_call:
         mark(ctx, "nuts_call", **detail)
         return Action("call")
 
-    if ctx.effective_call >= ctx.your_stack:
-        if equity >= max(required, CONFIG.all_in_equity_threshold) and ctx.can_call:
-            mark(ctx, "postflop_allin_call", **detail)
-            return Action("call")
-        mark(ctx, "postflop_allin_fold", **detail)
-        return Action("fold") if ctx.can_fold else call_or_check(ctx)
-
-    # Never raise into a bet or raise. Heads-up Axl and the six-seat table
-    # both answer inflation with jams; the extra opponents make that worse.
-    if equity >= required and ctx.can_call:
+    if share >= ctx.adjusted_pot_odds + extra and ctx.can_call:
         mark(ctx, "pot_odds_call", **detail)
         return Action("call")
     if ctx.can_fold:
@@ -128,15 +100,6 @@ def _unknown_action(ctx: Context) -> Action:
     if ctx.to_call <= cap and ctx.to_call < ctx.your_stack and ctx.can_call:
         return Action("call")
     return Action("fold")
-
-
-def _opponent_raised_post_reveal(ctx: Context) -> bool:
-    for action in ctx.raw.get("current_hand_actions") or []:
-        if not isinstance(action, dict):
-            continue
-        if action.get("round") == "post_reveal" and action.get("seat") != ctx.your_seat and action.get("action") == "raise":
-            return True
-    return False
 
 
 def _latest_post_reveal_aggressor(ctx: Context) -> int | None:

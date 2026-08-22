@@ -1,100 +1,124 @@
 # PHASE3_STRATEGY.md — A Crowded Table
 
-Phase 3 extends the Phase 2 strategy to six-seat, multiway tables. Rules use
-the same codenames and registry as Phase 2; the change is how equities,
-opponent state, position, and the objective are interpreted.
+Phase 3 is the same game as Phase 1/2 with two changes that matter for the
+bot: six seats, and you only score if you finish strictly first with `+10`.
+
+The five named seats (Dana, Miles, Theo, Rhea, Bram) are the same bots every
+leg. Their names are labels. This strategy never branches on a name. It
+rebuilds a per-*seat* action profile from `recent_hands` and prices the
+current hand from `current_hand_actions`.
 
 ## Objective
 
-Each 60-hand leg clears only when both conditions hold:
+A 60-hand leg clears only when both hold:
 
 1. Our chip delta is at least `+10`.
-2. Our chip delta is strictly greater than every non-busted player’s delta.
+2. Our chip delta is strictly greater than every other non-busted seat.
 
-The decision trace reports `leads_table` and `chips_needed_to_lead`, so live
-attempts can be checked against this objective rather than merely whether the
-bot is positive.
+`+49` while someone else is `+776` is a zero. Chip-EV grinding that finishes
+second is the wrong objective. The bot maximises expected pot share on each
+decision, then tightens only when it already leads late.
 
-## Live players
+## Algorithm
 
-`players` is always the table seating. It is not the current hand’s live
-range. The implementation removes our own seat and all `folded: true` or
-`busted: true` players before calculating multiway equity. A busted player is
-also omitted from the standing comparison because they cannot continue in the
-leg.
+Every `/move` does the same four steps.
 
-## Multiway equity
+### 1. Rank the number under the table rule
 
-The Phase 2 equity engine provides exact win/tie/loss probabilities against
-one opponent range. Phase 3 converts that to exact expected pot share against
-all currently live opponents. To receive any share, no opponent may be ahead;
-if `t` opponents tie, our share is `1 / (t + 1)`.
+`verdigris` / `cinnabar` are standard (pair beats unpaired, high wins).
+`obsidian` is inverted (unpaired low wins, pairs lose). `amaranth` keeps
+pairs first, then unpaired 7, then high. Equity tables are built from the
+rank function, so 13 is trash on obsidian and 7 is a premium on amaranth
+without any special-case "if amaranth and number==7".
 
-This is calculated analytically from the one-opponent probabilities, avoiding
-an expensive enumeration of up to `13**5` possible opponent-number vectors.
-The same calculation is used:
+### 2. Infer a range for each opponent who is actually in the pot
 
-- pre-reveal against the latest raiser’s inferred range;
-- post-reveal against the latest bettor/raiser’s inferred range; and
-- when building rule-relative percentiles for voluntary actions.
+`players` is the seating list, including folded and busted seats. Live
+opponents are seats that are not us, not folded, and not busted.
 
-For now, that active opponent’s inferred range is applied to every live
-opponent in the pot. This is deliberately conservative; later tuning can use
-one inferred range for the aggressor and wider ranges for players who checked
-or called.
+That list is *not* the range we are facing. A raise from one seat does not
+put a tight hand in every other seat. Players who have not acted yet can
+still fold.
 
-As a result, a number that is profitable heads-up can correctly become a fold
-with several live opponents.
+Committed opponents are seats that have `call` / `raise` / `bet` in
+`current_hand_actions`. The call is priced against those seats only.
 
-## Opponent reads
+Each committed seat gets its own number-set:
 
-Phase 2’s smoothed pre-reveal raise frequency continues across all four legs.
-Phase 3 additionally keeps a separate frequency bucket per seat, allowing the
-bot to use the latest pre-reveal raiser or post-reveal bettor’s own history
-when estimating the range it faces. The aggregate remains the fallback while
-an individual has little or no history.
+- First-in open: top of the rule-ordered numbers, width from that seat's
+  *position* (UTG tighter than the button), mixed with that seat's observed
+  pre-reveal raise frequency from the last 20 hands.
+- 3-bet: top 12–40%.
+- Post-reveal bet/raise: top of the post-reveal ordering, shrunk when the
+  bet is large relative to the pot, widened when that seat has been betting
+  a lot.
+- Call: most playable numbers, not the raiser's range.
 
-The five named opponents are intentionally not assigned behavioural meanings.
-Their observed actions, not their names, drive the model.
+A seat we have never seen uses the position prior, not a 13-only range.
 
-## Position
+### 3. Convert those ranges into a pot share
 
-For three or more non-busted seats, positional last-to-act is derived from the
-live seating order:
+Against one opponent the engine already has exact win/tie/lose. Against
+several opponents with *different* ranges, expected pot share is:
 
-- post-reveal: the button is last;
-- pre-reveal: the second live seat after the button (the big blind) is last.
+```
+sum over subsets T of opponents
+    P(we tie exactly the seats in T and beat everyone else) / (|T| + 1)
+```
 
-Busted seats are skipped for these calculations. The original heads-up
-button/non-button logic is retained unchanged for two live seats.
+That is `2^n` terms, `n <= 5`. If anyone is ahead our share is 0. This is
+the number `share` used below. It already includes multiway; there is no
+second "add 3.5% per extra opponent" tax on top.
 
-## Multiway risk controls
+### 4. Take the highest-EV legal action
 
-The Phase 2 range policy remains in effect, with Phase 3 offsets:
+Facing chips:
 
-- add `0.035` call-equity margin for every opponent beyond the first;
-- add `0.04` value-equity requirement for every opponent beyond the first;
-- retain rule-aware range equity, stack-risk adjustment, commitment caps, and
-  unknown-rule fallback.
+```
+call if share >= to_call / (pot + to_call) + edge
+```
 
-The stricter thresholds reflect that a bet must get through every remaining
-player rather than one opponent.
+`to_call` is capped at our stack, so an overjam for 400 when we have 75 is
+priced as calling 75 into the pot, not as 400/475. All-in spots use raw pot
+odds. A 0.60 equity floor is what folded a 50% ten into a 30% pot.
 
-## Endgame
+Premium share (`>= 0.70`) always continues. Isolation 3-bets happen when
+share is high and we are heads-up to the raiser (or the number is a lock),
+so that a maniac does not get to play the fish's chips for us.
 
-At 75% of a Phase 3 leg, the bot protects a lead only if it is both at least
-`+20` and currently strictly leads the table. At 85%, it can loosen the call
-margin only if it still needs the `+10` threshold or needs chips to take the
-lead. This keeps Phase 2’s independent-leg logic while applying the Phase 3
-top-table condition.
+First-in at six seats is raise-or-fold, except the big blind (free check)
+and a cheap small-blind complete. Limping a 4 or 6 with four people left to
+act is how the chip leader prints blinds.
+
+Unraised post-reveal: bet when share is a value hand; bluff only heads-up,
+last to act, against a seat that has actually folded to bets. Facing a bet:
+call or fold, never inflate a pot the table answers with a jam unless we
+already have a lock.
+
+Late in a Phase 3 leg, if we strictly lead by 25+ and are above `+10`,
+`edge` goes up and bluffs turn off. If we still need the lead, `edge` goes
+down. We never take a negative-EV call just because we are behind.
+
+## Why the 150 happened
+
+The previous policy applied the raiser's range to every live seat, then
+added extra call margin per opponent, then required 60% equity to call an
+all-in. That produced folds like:
+
+- a 9 to a 6-chip open, because a player who had not acted was treated as
+  holding the raiser's hand (`share ≈ 0.08`);
+- a 10 into 846 at 50% equity, because 50% < 0.60;
+- a 13 on amaranth to a 9-chip open, same multiway-range bug.
+
+Those are algorithm bugs, not "Miles always jams" scripts. The same
+mistakes would lose to any aggressive seat.
 
 ## Validation
 
-`tests/test_phase3.py` verifies that multiway equity decreases with additional
-live opponents, folded/busted players are filtered, standings are computed,
-and a six-seat request returns a legal action. Run the complete suite before
-deploying:
+`tests/test_phase3.py` covers six-seat legality, first-in opens, the live
+fold leaks above, obsidian high/low, and that `showdown/` never mentions
+the five names. Run:
 
 ```sh
-pytest -q
+.venv-test/bin/python -m pytest -q
 ```

@@ -92,10 +92,10 @@ class Phase3Config:
     target_delta: int = 10
     hands_per_leg: int = 60
     seats: int = 6
-    # A multiway showdown needs to beat every live number. These offsets make
-    # voluntary bets and calls materially tighter than heads-up play.
-    extra_call_margin_per_opponent: float = 0.035
-    extra_value_equity_per_opponent: float = 0.04
+    # Extra value-bet equity per extra live opponent. Call decisions do not
+    # add a similar offset: multiway is already in the pot-share number.
+    extra_call_margin_per_opponent: float = 0.0
+    extra_value_equity_per_opponent: float = 0.03
 
 
 CONFIG = Config()

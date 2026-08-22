@@ -54,7 +54,7 @@ def test_extract_reads_phase2_leg_log_schema() -> None:
     assert extract(match) == [Showdown("obsidian", 1, 1, 4, {0: 2, 1: 7}, (1,))]
 
 
-def test_large_post_reveal_reraise_does_not_bust_with_non_lock_hand() -> None:
+def test_large_post_reveal_reraise_never_commits_a_large_fraction_of_stack() -> None:
     body = cloned_request()
     body.update({
         "table_rule": "standard",

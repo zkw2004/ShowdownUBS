@@ -60,11 +60,15 @@ PRE_REVEAL_TABLES = {
 
 def post_reveal_equity(number: int, community: int, table_rule: str = "standard") -> tuple[float, float, float]:
     rule = get_rule(table_rule)
+    if rule is None:
+        raise KeyError(f"unknown table rule: {table_rule}")
     table = POST_REVEAL_TABLES.setdefault(rule.codename, compute_post_reveal_table(rule))
     return table[(number, community)]
 
 
 def pre_reveal_equity(number: int, table_rule: str = "standard") -> tuple[float, float, float]:
     rule = get_rule(table_rule)
+    if rule is None:
+        raise KeyError(f"unknown table rule: {table_rule}")
     table = PRE_REVEAL_TABLES.setdefault(rule.codename, compute_pre_reveal_table(rule))
     return table[number]

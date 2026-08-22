@@ -34,6 +34,9 @@ class Context:
     big_blind: int
     hand_number: int
     total_hands: int
+    leg_number: int | None
+    total_legs: int | None
+    match_id: str | None
     chip_delta: int
     my_bet_this_round: int
     acting_last: bool
@@ -91,6 +94,9 @@ def parse_context(body: dict[str, Any]) -> Context:
         big_blind=int(body.get("big_blind", 2) or 2),
         hand_number=int(body.get("hand_number", 1) or 1),
         total_hands=int(body.get("total_hands", 100) or 100),
+        leg_number=_optional_int(body.get("leg_number")),
+        total_legs=_optional_int(body.get("total_legs")),
+        match_id=_optional_str(body.get("match_id")),
         chip_delta=chip_delta,
         my_bet_this_round=my_bet_this_round,
         acting_last=acting_last,
@@ -108,3 +114,9 @@ def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)

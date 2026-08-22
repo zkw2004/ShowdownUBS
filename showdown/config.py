@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 
 
 @dataclass(frozen=True)
@@ -44,4 +45,37 @@ class Config:
     medium_open_raise_to_bb: float = 2.5
 
 
+@dataclass(frozen=True)
+class RuleConfig:
+    open_raise_min_percentile: float = 0.55
+    value_bet_min_equity: float = 0.64
+    bet_size_pot_fraction: float = 0.65
+    bluff_frequency: float = 0.18
+    call_equity_margin: float = 0.04
+    max_commitment_fraction: float = 0.45
+
+
+@dataclass(frozen=True)
+class Phase2Config:
+    default: RuleConfig = RuleConfig()
+    per_rule: dict[str, RuleConfig] | None = None
+    unknown_mode: RuleConfig = RuleConfig(
+        open_raise_min_percentile=0.85,
+        value_bet_min_equity=0.90,
+        bet_size_pot_fraction=0.50,
+        bluff_frequency=0.0,
+        call_equity_margin=0.0,
+        max_commitment_fraction=0.15,
+    )
+    recon_mode: bool = False
+    target_delta: int = 25
+    hands_per_leg: int = 40
+
+    def for_rule(self, codename: str, solved: bool) -> RuleConfig:
+        if not solved:
+            return self.unknown_mode
+        return (self.per_rule or {}).get(codename, self.default)
+
+
 CONFIG = Config()
+PHASE2_CONFIG = Phase2Config(recon_mode=os.getenv("SHOWDOWN_RECON_MODE", "").lower() in {"1", "true", "yes"})

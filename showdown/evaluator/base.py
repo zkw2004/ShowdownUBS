@@ -6,5 +6,5 @@ from typing import Protocol
 class ShowdownRule(Protocol):
     codename: str
 
-    def rank(self, number: int, community: int | None) -> tuple[int, int]:
+    def rank(self, number: int, community: int | None) -> tuple[int, ...]:
         """Return a comparable ranking tuple where larger is better."""

@@ -1,45 +1,57 @@
 from __future__ import annotations
 
-from showdown.config import CONFIG
+from showdown.config import CONFIG, PHASE2_CONFIG, RuleConfig
 from showdown.models import Action, Context
 from showdown.strategy.sizing import call_or_check, fraction_of_pot_raise, multiple_of_amount_raise
 
 
-def decide_postflop(ctx: Context, win: float, tie: float, adjusted_equity: float, aggression_margin: float, bluff_enabled: bool) -> Action:
-    is_pair = ctx.community_number is not None and ctx.your_number == ctx.community_number
-    if is_pair:
-        return _play_pair(ctx)
+def decide_postflop(
+    ctx: Context,
+    win: float,
+    tie: float,
+    adjusted_equity: float,
+    aggression_margin: float,
+    bluff_enabled: bool,
+    rule_config: RuleConfig,
+    unknown: bool,
+) -> Action:
+    if unknown:
+        return _unknown_action(ctx)
 
     if ctx.to_call == 0:
-        if adjusted_equity >= CONFIG.high_value_equity:
-            return fraction_of_pot_raise(ctx, CONFIG.strong_value_bet_fraction)
-        if adjusted_equity >= CONFIG.medium_value_equity:
+        if adjusted_equity >= max(rule_config.value_bet_min_equity + 0.10, 0.74):
+            return fraction_of_pot_raise(ctx, rule_config.bet_size_pot_fraction)
+        if adjusted_equity >= rule_config.value_bet_min_equity:
             if ctx.acting_last:
-                return fraction_of_pot_raise(ctx, CONFIG.medium_value_bet_fraction, prefer_call=True)
+                return fraction_of_pot_raise(ctx, rule_config.bet_size_pot_fraction * 0.65, prefer_call=True)
             return Action("check")
         if adjusted_equity < CONFIG.low_equity_bluff_threshold and bluff_enabled and ctx.acting_last:
             return fraction_of_pot_raise(
                 ctx,
                 CONFIG.bluff_bet_fraction,
-                cap_fraction_of_stack=CONFIG.bluff_max_stack_fraction,
+                cap_fraction_of_stack=min(CONFIG.bluff_max_stack_fraction, rule_config.max_commitment_fraction),
                 prefer_call=True,
             )
         return Action("check")
 
     if _should_raise_for_value(ctx, adjusted_equity, aggression_margin):
         seen_total = ctx.my_bet_this_round + ctx.to_call
-        return multiple_of_amount_raise(ctx, seen_total, CONFIG.value_raise_multiplier, cap_fraction_of_stack=CONFIG.max_normal_commit_fraction)
+        return multiple_of_amount_raise(ctx, seen_total, CONFIG.value_raise_multiplier, cap_fraction_of_stack=rule_config.max_commitment_fraction)
 
     if _should_call(ctx, adjusted_equity, aggression_margin):
         return Action("call")
     return Action("fold")
 
 
-def _play_pair(ctx: Context) -> Action:
+def _unknown_action(ctx: Context) -> Action:
     if ctx.to_call == 0:
-        return fraction_of_pot_raise(ctx, CONFIG.pair_bet_fraction)
-    seen_total = ctx.my_bet_this_round + ctx.to_call
-    return multiple_of_amount_raise(ctx, seen_total, CONFIG.pair_raise_multiplier)
+        return Action("check")
+    cap = max(0, min(6, int(ctx.your_stack * 0.05)))
+    if PHASE2_CONFIG.recon_mode:
+        cap = max(cap, int(ctx.your_stack * 0.10))
+    if ctx.to_call <= cap and ctx.to_call < ctx.your_stack and ctx.can_call:
+        return Action("call")
+    return Action("fold")
 
 
 def _should_raise_for_value(ctx: Context, adjusted_equity: float, aggression_margin: float) -> bool:

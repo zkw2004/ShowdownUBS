@@ -2,10 +2,10 @@
   "version": 1,
   "rules": {
     "amaranth": {
-      "description": "Pair beats non-pair; otherwise higher number wins.",
-      "observations_used": 20,
-      "rule_id": "standard",
-      "source_runs": ["803ab4e6-60aa-4544-826b-eecfa8413db7"],
+      "description": "7 is always strongest; otherwise higher number wins. Pairs are not a special tier.",
+      "observations_used": 35,
+      "rule_id": "wild:direction=1:dominant=2:pair_effect=neutral:parameter=7",
+      "source_runs": ["803ab4e6-60aa-4544-826b-eecfa8413db7", "phase3-seed1147473280"],
       "status": "solved"
     },
     "cinnabar": {

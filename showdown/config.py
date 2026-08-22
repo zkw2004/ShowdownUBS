@@ -48,7 +48,7 @@ class Config:
     postflop_value_raise_equity: float = 0.80
     risk_extra_margin: float = 0.20
     raise_range_decay: float = 0.60
-    min_range_fraction: float = 0.15
+    min_range_fraction: float = 0.40
     bet_range_base: float = 0.30
     bet_range_aggro_weight: float = 0.70
     bluff_max_opponent_aggro: float = 0.30

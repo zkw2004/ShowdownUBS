@@ -1,4 +1,5 @@
 from showdown.equity import multiway_adjusted_equity, post_reveal_multiway_equity
+from showdown.evaluator.registry import get_rule
 from showdown.models import parse_context
 from showdown.strategy.decide import _is_phase3, decide
 
@@ -137,3 +138,33 @@ def test_utg_folds_trash_first_in() -> None:
         }
     )
     assert decide(body).action == "fold"
+
+
+def test_amaranth_treats_seven_as_the_nuts() -> None:
+    rule = get_rule("amaranth")
+    assert rule is not None
+    assert rule.rank(7, 1) > rule.rank(13, 1)
+    assert rule.rank(7, 4) > rule.rank(12, 4)
+    assert rule.rank(12, 9) > rule.rank(11, 9)
+
+
+def test_twelve_calls_a_small_open_instead_of_folding() -> None:
+    """The 15% range floor made every 12 look like a fold to a 10-chip raise."""
+    body = cloned_request()
+    body.update(
+        {
+            "phase": 3,
+            "table_rule": "cinnabar",
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_number": 12,
+            "to_call": 8,
+            "pot": 15,
+            "your_stack": 199,
+            "min_raise_to": 18,
+            "max_raise_to": 199,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 10}],
+        }
+    )
+    assert decide(body).action == "call"

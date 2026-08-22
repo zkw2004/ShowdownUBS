@@ -29,10 +29,11 @@ def _respond_to_raise(ctx: Context, opponent_raises: int, rule_config: RuleConfi
     # to uniform, and folding medium numbers to them forfeits the pot odds.
     aggressor = _latest_pre_reveal_raiser(ctx)
     freq = ATTEMPT_STATE.opponent.pre_raise_freq(aggressor)
-    range_fraction = max(
-        CONFIG.min_range_fraction,
-        freq * (CONFIG.raise_range_decay ** (opponent_raises - 1)),
-    )
+    # A 3bb open is not a 13-only range. Flooring at 15% made every 10/12
+    # a fold (Hand 43: 10 folded to 16; cinnabar 12 folded to 10).
+    range_fraction = max(CONFIG.min_range_fraction, freq)
+    if opponent_raises >= 2:
+        range_fraction = max(0.28, freq * CONFIG.raise_range_decay)
     equity = pre_reveal_multiway_equity_vs_range(
         ctx.your_number, ctx.table_rule, range_fraction, ctx.live_opponent_count
     )
@@ -104,10 +105,11 @@ def _decide_first_in(ctx: Context, percentile: float, rule_config: RuleConfig) -
     if percentile >= open_need:
         mark(ctx, "preflop_open_raise", position=position)
         return raise_action(ctx, int(round(CONFIG.medium_open_raise_to_bb * ctx.big_blind)), prefer_call=True)
-    if percentile <= CONFIG.button_complete_min_percentile and ctx.can_fold:
+    complete_floor = CONFIG.button_complete_min_percentile if position in {"btn", "sb"} else 0.38
+    if percentile <= complete_floor and ctx.can_fold:
         mark(ctx, "preflop_first_in_fold", position=position)
         return Action("fold")
-    if position in {"btn", "sb", "co"} or ctx.to_call <= ctx.big_blind:
+    if position in {"btn", "sb", "co"} or (ctx.to_call <= ctx.big_blind and percentile >= 0.38):
         mark(ctx, "preflop_complete", position=position)
         return call_or_check(ctx)
     if ctx.can_fold:

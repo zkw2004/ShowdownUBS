@@ -10,7 +10,9 @@ from showdown.safety import fallback_action, sanitize
 from showdown.strategy.decide import decide
 
 app = FastAPI()
-logger = logging.getLogger("showdown.moves")
+# Uvicorn configures this logger at INFO level on Render.  A new logger name
+# may inherit a WARNING-only root logger and silently discard move traces.
+logger = logging.getLogger("uvicorn.error")
 LOG_MOVES = os.getenv("SHOWDOWN_LOG_MOVES", "").lower() in {"1", "true", "yes"}
 
 

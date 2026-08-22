@@ -18,6 +18,20 @@ def decide_postflop(
     if unknown:
         return _unknown_action(ctx)
 
+    # A large re-raise from the rule-aware opponent is much stronger evidence
+    # than our unconditional equity against a random number.  Phase 2 awards
+    # points per leg, so turning an 11-like value hand into a 200-chip bust is
+    # worse than releasing it and preserving the remaining 20-ish hands.
+    # This remains rule-agnostic: only near-lock hands may risk a quarter of
+    # the current stack after facing heavy pressure.
+    if (
+        ctx.to_call > 0
+        and ctx.to_call / max(ctx.your_stack, 1) > 0.25
+        and adjusted_equity < 0.93
+        and ctx.can_fold
+    ):
+        return Action("fold")
+
     if ctx.to_call == 0:
         if adjusted_equity >= max(rule_config.value_bet_min_equity + 0.10, 0.74):
             return fraction_of_pot_raise(ctx, rule_config.bet_size_pot_fraction)

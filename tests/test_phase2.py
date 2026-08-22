@@ -52,3 +52,20 @@ def test_extract_reads_phase2_leg_log_schema() -> None:
         }]}}]
     }
     assert extract(match) == [Showdown("obsidian", 1, 1, 4, {0: 2, 1: 7}, (1,))]
+
+
+def test_large_post_reveal_reraise_does_not_bust_with_non_lock_hand() -> None:
+    body = cloned_request()
+    body.update({
+        "table_rule": "standard",
+        "round": "post_reveal",
+        "your_number": 11,
+        "community_number": 12,
+        "pot": 84,
+        "to_call": 104,
+        "your_stack": 169,
+        "legal_actions": ["fold", "call", "raise"],
+        "min_raise_to": 169,
+        "max_raise_to": 169,
+    })
+    assert decide(body).action == "fold"

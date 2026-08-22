@@ -1,0 +1,5 @@
+fastapi<1,>=0.116
+uvicorn<1,>=0.35
+
+[dev]
+pytest<9,>=7.4

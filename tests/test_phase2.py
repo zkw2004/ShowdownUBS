@@ -5,6 +5,7 @@ from showdown.strategy.decide import decide
 from solver.candidates import generate_candidates
 from solver.eliminate import solve
 from solver.extract import Showdown
+from solver.extract import extract
 
 from tests.conftest import cloned_request
 
@@ -38,3 +39,16 @@ def test_context_reads_leg_metadata() -> None:
     body.update({"leg_number": 2, "total_legs": 4, "match_id": "attempt-a"})
     context = parse_context(body)
     assert (context.leg_number, context.total_legs, context.match_id) == (2, 4, "attempt-a")
+
+
+def test_extract_reads_phase2_leg_log_schema() -> None:
+    match = {
+        "legs": [{"rule_id": "obsidian", "result": {"hand_logs": [{
+            "hand_number": 1,
+            "community_number": 4,
+            "shown_numbers": {"0": 2, "1": 7},
+            "winners": [1],
+            "actions": [{"action": "check"}],
+        }]}}]
+    }
+    assert extract(match) == [Showdown("obsidian", 1, 1, 4, {0: 2, 1: 7}, (1,))]

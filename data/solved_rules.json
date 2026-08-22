@@ -1,4 +1,33 @@
 {
   "version": 1,
-  "rules": {}
+  "rules": {
+    "amaranth": {
+      "description": "Pair beats non-pair; otherwise higher number wins.",
+      "observations_used": 20,
+      "rule_id": "standard",
+      "source_runs": ["803ab4e6-60aa-4544-826b-eecfa8413db7"],
+      "status": "solved"
+    },
+    "cinnabar": {
+      "description": "Pair beats non-pair; otherwise higher number wins.",
+      "observations_used": 15,
+      "rule_id": "standard",
+      "source_runs": ["803ab4e6-60aa-4544-826b-eecfa8413db7"],
+      "status": "solved"
+    },
+    "obsidian": {
+      "description": "Pairs lose to non-pairs; otherwise lower number wins.",
+      "observations_used": 17,
+      "rule_id": "ordering:direction=-1:pair_effect=lose",
+      "source_runs": ["803ab4e6-60aa-4544-826b-eecfa8413db7"],
+      "status": "solved"
+    },
+    "verdigris": {
+      "description": "Pair beats non-pair; otherwise higher number wins.",
+      "observations_used": 24,
+      "rule_id": "standard",
+      "source_runs": ["803ab4e6-60aa-4544-826b-eecfa8413db7"],
+      "status": "solved"
+    }
+  }
 }

@@ -63,6 +63,8 @@ def decide(body: dict) -> Action:
         effective_pot=ctx.effective_pot,
         leads_table=ctx.leads_table,
         chips_needed_to_lead=ctx.chips_needed_to_lead,
+        raise_to_for_table_lead=ctx.raise_to_for_table_lead,
+        remaining_hands=ctx.remaining_hands,
     )
 
     if ctx.round_name == "post_reveal" and ctx.community_number is not None:

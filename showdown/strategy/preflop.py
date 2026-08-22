@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from showdown.config import CONFIG, PHASE2_CONFIG, RuleConfig
 from showdown.models import Action, Context
+from showdown.strategy.objective import objective_raise_target, should_force_leader_showdown
 from showdown.strategy.ranges import committed_opponent_seats, position_name, strength_index
 from showdown.strategy.sizing import call_or_check, multiple_of_amount_raise, raise_action
 from showdown.strategy.trace import mark
@@ -50,6 +51,18 @@ def _respond_to_raise(
         risk_fraction=round(ctx.risk_fraction, 4),
         pot_odds=round(ctx.adjusted_pot_odds, 4),
     )
+
+    if should_force_leader_showdown(ctx, share):
+        seen_total = ctx.my_bet_this_round + ctx.to_call
+        target = objective_raise_target(
+            ctx,
+            base_total=max(
+                ctx.min_raise_to or 0,
+                int(round(seen_total * CONFIG.preflop_reraise_multiplier)),
+            ),
+        )
+        mark(ctx, "preflop_objective_catchup_raise", objective_raise_to=target, **detail)
+        return raise_action(ctx, target)
 
     if (
         share >= CONFIG.preflop_value_reraise_equity
@@ -179,15 +192,7 @@ def _open_target(ctx: Context, base_big_blinds: float) -> int:
         and strength_index(ctx) == 0
     ):
         return base_total
-    cap_fraction = 0.30 if ctx.progress < 0.90 else 0.60 if ctx.progress < 0.96 else 1.0
-    desired_add = min(
-        ctx.your_stack,
-        max(
-            max(0, base_total - ctx.my_bet_this_round),
-            min(ctx.chips_needed_to_lead, int(ctx.your_stack * cap_fraction)),
-        ),
-    )
-    return ctx.my_bet_this_round + desired_add
+    return objective_raise_target(ctx, base_total)
 
 
 def _should_call(share: float, ctx: Context, edge: float) -> bool:

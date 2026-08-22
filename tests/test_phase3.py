@@ -528,6 +528,131 @@ def test_medium_number_does_not_isolate_two_limpers() -> None:
     assert decide(body).action in {"fold", "call"}
 
 
+def _late_heads_up_catchup_body() -> dict:
+    """Leg 4 hand 56: ordinary calls cannot erase the standings gap in time."""
+    body = cloned_request()
+    body.update(
+        {
+            "phase": 3,
+            "table_rule": "cinnabar",
+            "round": "post_reveal",
+            "community_number": 2,
+            "your_number": 10,
+            "hand_number": 56,
+            "total_hands": 60,
+            "leg_number": 4,
+            "total_legs": 4,
+            "match_id": "phase3-catchup-leg4",
+            "your_seat": 0,
+            "button_seat": 1,
+            "pot": 27,
+            "to_call": 11,
+            "min_raise_to": 22,
+            "max_raise_to": 440,
+            "your_stack": 440,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [
+                {"seat": 1, "round": "pre_reveal", "action": "call", "amount": 2},
+                {"seat": 0, "round": "pre_reveal", "action": "raise", "amount": 8},
+                {"seat": 1, "round": "pre_reveal", "action": "call", "amount": 8},
+                {"seat": 0, "round": "post_reveal", "action": "check"},
+                {"seat": 1, "round": "post_reveal", "action": "bet", "amount": 11},
+            ],
+            "players": [
+                {
+                    "seat": 0,
+                    "name": "you",
+                    "chip_delta": 248,
+                    "bet_this_round": 0,
+                    "stack": 440,
+                    "busted": False,
+                    "folded": False,
+                },
+                {
+                    "seat": 1,
+                    "name": "leader",
+                    "chip_delta": 577,
+                    "bet_this_round": 11,
+                    "stack": 758,
+                    "busted": False,
+                    "folded": False,
+                },
+                {
+                    "seat": 2,
+                    "name": "two",
+                    "chip_delta": -200,
+                    "bet_this_round": 0,
+                    "stack": 0,
+                    "busted": True,
+                    "folded": True,
+                },
+                {
+                    "seat": 3,
+                    "name": "three",
+                    "chip_delta": -200,
+                    "bet_this_round": 0,
+                    "stack": 0,
+                    "busted": True,
+                    "folded": True,
+                },
+                {
+                    "seat": 4,
+                    "name": "four",
+                    "chip_delta": -200,
+                    "bet_this_round": 0,
+                    "stack": 0,
+                    "busted": True,
+                    "folded": True,
+                },
+                {
+                    "seat": 5,
+                    "name": "five",
+                    "chip_delta": -200,
+                    "bet_this_round": 0,
+                    "stack": 0,
+                    "busted": True,
+                    "folded": True,
+                },
+            ],
+        }
+    )
+    return body
+
+
+def test_late_heads_up_catchup_raise_targets_a_lead_flipping_pot() -> None:
+    body = _late_heads_up_catchup_body()
+    context = parse_context(body)
+    assert context.chips_needed_to_lead == 330
+    assert context.sole_leader_seat == 1
+    # Winning 165 directly from the leader flips a 329-chip gap. Eight of
+    # those chips were already committed before the current betting round.
+    assert context.raise_to_for_table_lead == 157
+
+    action = decide(body)
+    assert action.action == "raise"
+    assert action.amount is not None and action.amount >= 157
+    assert body["_decision_trace"]["reason"] == "objective_catchup_raise"
+
+
+def test_catchup_raise_does_not_replace_normal_early_pot_odds_play() -> None:
+    body = _late_heads_up_catchup_body()
+    body["hand_number"] = 40
+    assert decide(body).action == "call"
+
+
+def test_catchup_raise_only_targets_the_actual_table_leader() -> None:
+    body = _late_heads_up_catchup_body()
+    body["players"][2].update(
+        {
+            "chip_delta": 600,
+            "stack": 800,
+            "busted": False,
+            "folded": True,
+        }
+    )
+    assert decide(body).action == "call"
+
+
 def test_late_top_number_open_is_sized_to_take_the_lead() -> None:
     body = _six_seat_body()
     body.update(
@@ -556,7 +681,7 @@ def test_late_top_number_open_is_sized_to_take_the_lead() -> None:
     )
     action = decide(body)
     assert action.action == "raise"
-    assert action.amount is not None and action.amount >= 100
+    assert action.amount is not None and action.amount >= 51
 
 
 def test_late_post_reveal_nuts_bet_can_take_the_lead() -> None:
@@ -586,7 +711,7 @@ def test_late_post_reveal_nuts_bet_can_take_the_lead() -> None:
     )
     action = decide(body)
     assert action.action == "bet"
-    assert action.amount is not None and action.amount >= 100
+    assert action.amount is not None and action.amount >= 51
 
 
 def test_late_post_reveal_nuts_raise_can_take_the_lead() -> None:
@@ -616,7 +741,7 @@ def test_late_post_reveal_nuts_raise_can_take_the_lead() -> None:
     )
     action = decide(body)
     assert action.action == "raise"
-    assert action.amount is not None and action.amount >= 100
+    assert action.amount is not None and action.amount >= 51
 
 
 def test_strategy_code_does_not_hardcode_opponent_names() -> None:

@@ -4,6 +4,7 @@ import math
 
 from showdown.config import CONFIG, PHASE2_CONFIG, PHASE3_CONFIG, RuleConfig
 from showdown.models import Action, Context
+from showdown.strategy.objective import objective_raise_target, should_force_leader_showdown
 from showdown.strategy.profiles import SeatProfile
 from showdown.strategy.ranges import strength_index
 from showdown.strategy.sizing import call_or_check, fraction_of_pot_raise, multiple_of_amount_raise, raise_action
@@ -48,15 +49,18 @@ def _decide_unraised(
             and fold_rate < 0.35
         ):
             # In Phase 3, +chips in second place still scores zero. With the
-            # literal nuts late, create a pot large enough to take the lead;
-            # cap the escalation until the final few hands.
-            cap_fraction = 0.35 if ctx.progress < 0.90 else 0.65 if ctx.progress < 0.96 else 1.0
-            desired_add = min(
-                ctx.your_stack,
-                max(ctx.pot, min(ctx.chips_needed_to_lead, int(ctx.your_stack * cap_fraction))),
+            # literal nuts late, create a pot large enough to take the lead.
+            target = objective_raise_target(
+                ctx,
+                base_total=ctx.my_bet_this_round + ctx.pot,
             )
-            mark(ctx, "objective_nuts_bet", fold_probability=round(fold_rate, 4))
-            return raise_action(ctx, ctx.my_bet_this_round + desired_add)
+            mark(
+                ctx,
+                "objective_nuts_bet",
+                fold_probability=round(fold_rate, 4),
+                objective_raise_to=target,
+            )
+            return raise_action(ctx, target)
         mark(ctx, "nuts_value_bet", fold_probability=round(fold_rate, 4))
         return fraction_of_pot_raise(ctx, _adaptive_value_fraction(rule_config, fold_rate))
     if share >= max(value_min + 0.08, 0.70):
@@ -113,18 +117,22 @@ def _decide_facing_chips(ctx: Context, share: float, edge: float, ranges: dict[i
     if strength_index(ctx) == 0 and ctx.can_raise and ctx.effective_call < ctx.your_stack:
         seen_total = ctx.my_bet_this_round + ctx.to_call
         if ctx.is_phase3 and not ctx.leads_table and ctx.progress >= 0.80:
-            cap_fraction = 0.35 if ctx.progress < 0.90 else 0.65 if ctx.progress < 0.96 else 1.0
-            objective_total = ctx.my_bet_this_round + min(
-                ctx.your_stack,
-                min(ctx.chips_needed_to_lead, int(ctx.your_stack * cap_fraction)),
-            )
-            mark(ctx, "objective_nuts_raise", **detail)
-            return raise_action(
+            target = objective_raise_target(
                 ctx,
-                max(int(round(seen_total * CONFIG.value_raise_multiplier)), objective_total),
+                base_total=int(round(seen_total * CONFIG.value_raise_multiplier)),
             )
+            mark(ctx, "objective_nuts_raise", objective_raise_to=target, **detail)
+            return raise_action(ctx, target)
         mark(ctx, "nuts_value_raise", **detail)
         return multiple_of_amount_raise(ctx, seen_total, CONFIG.value_raise_multiplier)
+
+    if should_force_leader_showdown(ctx, share):
+        target = objective_raise_target(
+            ctx,
+            base_total=max(ctx.min_raise_to or 0, ctx.my_bet_this_round + ctx.to_call),
+        )
+        mark(ctx, "objective_catchup_raise", objective_raise_to=target, **detail)
+        return raise_action(ctx, target)
 
     if share >= 0.70 and ctx.can_call:
         mark(ctx, "nuts_call", **detail)

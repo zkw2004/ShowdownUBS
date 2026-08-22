@@ -119,6 +119,56 @@ class Context:
         return max(0, self.highest_other_delta - self.chip_delta + 1)
 
     @property
+    def sole_leader_seat(self) -> int | None:
+        """Seat of the unique opponent currently leading the table, if any."""
+        leaders = [
+            seat
+            for seat, delta in self.player_deltas
+            if seat != self.your_seat and delta == self.highest_other_delta
+        ]
+        return leaders[0] if len(leaders) == 1 else None
+
+    @property
+    def raise_to_for_table_lead(self) -> int:
+        """Current-round target that can flip a unique live leader if called.
+
+        Chips won directly from the leader move both deltas: one chip added to
+        ours is also one chip removed from theirs. The required transfer is
+        therefore half the standings gap. Previous-round chips already put in
+        by that leader count toward the transfer.
+        """
+        gap = self.chips_needed_to_lead
+        if gap <= 0:
+            return self.my_bet_this_round
+
+        leader_seat = self.sole_leader_seat
+        if leader_seat is None or leader_seat not in self.live_opponent_seats:
+            return self.my_bet_this_round + gap
+
+        transfer_needed = (gap + 1) // 2
+        leader = next(
+            (
+                player
+                for player in self.raw.get("players") or []
+                if int(player.get("seat", -1)) == leader_seat
+            ),
+            None,
+        )
+        if leader is None:
+            return max(self.my_bet_this_round, transfer_needed)
+
+        current_round = int(leader.get("bet_this_round", 0) or 0)
+        previous_rounds = 0
+        if leader.get("stack") is not None and self.raw.get("starting_stack") is not None:
+            start_of_hand = int(self.raw.get("starting_stack", 0) or 0) + int(
+                leader.get("chip_delta", 0) or 0
+            )
+            total_committed = max(current_round, start_of_hand - int(leader.get("stack", 0) or 0))
+            previous_rounds = max(0, total_committed - current_round)
+
+        return max(self.my_bet_this_round, transfer_needed - previous_rounds)
+
+    @property
     def is_phase3(self) -> bool:
         """Phase is a match property. Do not infer it from who is still in this pot."""
         if self.phase == 3:
@@ -135,6 +185,10 @@ class Context:
     def progress(self) -> float:
         hands = max(self.total_hands, 1)
         return min(1.0, max(0.0, self.hand_number / hands))
+
+    @property
+    def remaining_hands(self) -> int:
+        return max(1, self.total_hands - self.hand_number + 1)
 
 
 def parse_context(body: dict[str, Any]) -> Context:

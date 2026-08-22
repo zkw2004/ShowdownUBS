@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 
 from fastapi import FastAPI, Request
 
+from showdown.observe import observe
 from showdown.safety import fallback_action, sanitize
 from showdown.strategy.decide import decide
 
 app = FastAPI()
-# Uvicorn configures this logger at INFO level on Render.  A new logger name
+# Uvicorn configures this logger at INFO level.  A new logger name
 # may inherit a WARNING-only root logger and silently discard move traces.
 logger = logging.getLogger("uvicorn.error")
-LOG_MOVES = os.getenv("SHOWDOWN_LOG_MOVES", "").lower() in {"1", "true", "yes"}
+LOG_MOVES = os.getenv("SHOWDOWN_LOG_MOVES", "1").lower() not in {"0", "false", "no"}
 
 
 @app.get("/health")
@@ -30,35 +30,5 @@ async def move(request: Request) -> dict:
         logger.exception("decision_error")
         action = fallback_action(body)
     response = sanitize(action, body)
-    if LOG_MOVES:
-        logger.info("move_trace=%s", json.dumps(_trace(body, response), sort_keys=True, default=str))
+    observe(body, response, LOG_MOVES)
     return response
-
-
-def _trace(body: dict, response: dict) -> dict:
-    """Log every input that affects a decision, without the 20-hand duplicate history."""
-    players = body.get("players") or []
-    recent_hands = body.get("recent_hands") or []
-    return {
-        "match_id": body.get("match_id"),
-        "leg": body.get("leg_number"),
-        "total_legs": body.get("total_legs"),
-        "hand": body.get("hand_number"),
-        "round": body.get("round"),
-        "rule": body.get("table_rule"),
-        "your_number": body.get("your_number"),
-        "community_number": body.get("community_number"),
-        "pot": body.get("pot"),
-        "to_call": body.get("to_call"),
-        "your_stack": body.get("your_stack"),
-        "chip_delta": next((player.get("chip_delta") for player in players if player.get("name") == "you"), None),
-        "legal_actions": body.get("legal_actions"),
-        "min_raise_to": body.get("min_raise_to"),
-        "max_raise_to": body.get("max_raise_to"),
-        "current_hand_actions": body.get("current_hand_actions"),
-        # One completed record supplies the showdown winner/numbers needed to
-        # validate the active secret-rule mapping without repeating 20 hands.
-        "last_completed_hand": recent_hands[-1] if recent_hands else None,
-        "decision": body.get("_decision_trace"),
-        "response": response,
-    }

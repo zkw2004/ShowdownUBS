@@ -4,7 +4,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from showdown.main import app
-from showdown.main import _trace
+from showdown.observe import _audit_hand, _move_trace
 from tests.conftest import cloned_request
 
 
@@ -40,7 +40,7 @@ def test_move_handles_unknown_fields() -> None:
 def test_move_trace_captures_decision_inputs() -> None:
     body = cloned_request()
     body["leg_number"] = 2
-    trace = _trace(body, {"action": "call"})
+    trace = _move_trace(body, {"action": "call"})
     assert trace["leg"] == 2
     assert trace["your_number"] == body["your_number"]
     assert trace["response"] == {"action": "call"}
@@ -49,10 +49,28 @@ def test_move_trace_captures_decision_inputs() -> None:
 def test_move_trace_includes_strategy_explanation() -> None:
     body = cloned_request()
     body["_decision_trace"] = {"adjusted_equity": 0.8, "reason": "value_raise"}
-    assert _trace(body, {"action": "raise", "amount": 12})["decision"]["reason"] == "value_raise"
+    assert _move_trace(body, {"action": "raise", "amount": 12})["decision"]["reason"] == "value_raise"
 
 
-def test_move_trace_includes_latest_completed_hand() -> None:
-    body = cloned_request()
-    body["recent_hands"] = [{"hand_number": 1}, {"hand_number": 2, "winners": [0]}]
-    assert _trace(body, {"action": "check"})["last_completed_hand"] == {"hand_number": 2, "winners": [0]}
+def test_audit_confirms_a_correct_mapping() -> None:
+    # Under "standard" the higher number wins, so seat 1 taking it agrees.
+    record = {"hand_number": 4, "community_number": 5, "shown_numbers": {"0": 9, "1": 11}, "winners": [1]}
+    result = _audit_hand("standard", record)
+    assert result["predicted"] == [1]
+    assert result["verdict"] == "agree"
+
+
+def test_audit_flags_a_wrong_mapping() -> None:
+    # The lower number took the pot, which "standard" cannot explain.
+    record = {"hand_number": 5, "community_number": 5, "shown_numbers": {"0": 9, "1": 11}, "winners": [0]}
+    assert _audit_hand("standard", record)["verdict"] == "mismatch"
+
+
+def test_audit_ignores_hands_without_a_showdown() -> None:
+    record = {"hand_number": 6, "community_number": None, "shown_numbers": {}, "winners": [0]}
+    assert _audit_hand("standard", record)["verdict"] == "no_showdown"
+
+
+def test_audit_reports_an_unsolved_codename() -> None:
+    record = {"hand_number": 7, "community_number": 5, "shown_numbers": {"0": 9, "1": 11}, "winners": [1]}
+    assert _audit_hand("not-a-real-codename", record)["verdict"] == "rule_unsolved"

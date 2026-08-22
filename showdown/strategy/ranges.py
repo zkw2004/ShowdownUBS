@@ -17,6 +17,32 @@ POSITION_OPEN_FRACTION = {
 UNIFORM = tuple(range(1, 14))
 
 
+def sizing_range_floor(ctx: Context) -> float:
+    """A 3bb open is an open, not the nuts.
+
+    Phase 2/3: only the showdown ranking changes. Bet sizing is the same under
+    every rule, so a 6-chip raise is still a wide first-in range even if that
+    seat has been quiet so far.
+    """
+    call = ctx.effective_call
+    bb = max(ctx.big_blind, 1)
+    if call <= 4 * bb:
+        return 0.50
+    if call <= 8 * bb:
+        return 0.32
+    return 0.18
+
+
+def strength_index(ctx: Context) -> int:
+    """0 is the strongest number under this table rule (and community)."""
+    community = ctx.community_number if ctx.round_name == "post_reveal" else None
+    ordered = ordered_numbers(ctx.table_rule, community)
+    try:
+        return ordered.index(ctx.your_number)
+    except ValueError:
+        return 12
+
+
 def position_name(ctx: Context, seat: int | None = None) -> str:
     target = ctx.your_seat if seat is None else seat
     seats = sorted(
@@ -85,7 +111,7 @@ def _betting_range(ctx: Context, seat: int, profile: SeatProfile, community: int
     """Range when we are facing chips but have no raise/bet tagged on that seat."""
     fraction = POSITION_OPEN_FRACTION[position_name(ctx, seat)]
     mixed = (profile.hands * profile.pfr + 8.0 * fraction) / (profile.hands + 8.0)
-    mixed = max(0.20, min(0.80, mixed))
+    mixed = max(sizing_range_floor(ctx), min(0.80, mixed))
     ratio = ctx.effective_call / max(ctx.pot, 1)
     if ctx.round_name == "post_reveal":
         mixed = max(0.18, min(0.70, 0.32 + 0.50 * profile.post_aggression))
@@ -106,22 +132,21 @@ def range_for_seat(
     mixed = (profile.hands * profile.pfr + 8.0 * open_prior) / (profile.hands + 8.0)
     mixed = max(0.20, min(0.80, mixed))
     ratio = ctx.effective_call / max(ctx.pot, 1)
+    size_floor = sizing_range_floor(ctx)
 
     if raises >= 2:
-        fraction = max(0.12, min(0.40, mixed * 0.45))
+        fraction = max(0.15, min(0.40, mixed * 0.50, size_floor))
         if ratio >= 2.0:
             fraction = max(0.12, fraction * 0.85)
         return top_numbers(ctx.table_rule, fraction, community)
     if raises == 1 or bets:
-        fraction = mixed
+        fraction = max(size_floor, mixed)
         if ctx.round_name == "post_reveal":
-            fraction = max(0.18, min(0.70, 0.32 + 0.50 * profile.post_aggression))
+            fraction = max(size_floor, min(0.70, 0.32 + 0.50 * profile.post_aggression))
             if ratio >= 0.80:
-                fraction *= 0.55 if profile.pfr < 0.42 else 0.85
-            if ratio >= 1.50:
                 fraction *= 0.70 if profile.pfr < 0.42 else 0.90
-        elif ratio >= 2.0:
-            fraction = max(0.20, fraction * 0.75)
+            if ratio >= 1.50:
+                fraction *= 0.75 if profile.pfr < 0.42 else 0.92
         return top_numbers(ctx.table_rule, max(0.15, min(0.80, fraction)), community)
     if calls:
         # Callers show up with most playable numbers, including some traps.

@@ -11,7 +11,7 @@ from showdown.evaluator.registry import get_rule
 from showdown.models import Action, parse_context
 from showdown.strategy.postflop import decide_postflop
 from showdown.strategy.preflop import decide_preflop
-from showdown.strategy.profiles import profiles_from
+from showdown.strategy.profiles import profiles_from_window
 from showdown.strategy.ranges import infer_ranges, pot_share
 from showdown.strategy.state import ATTEMPT_STATE
 from showdown.strategy.trace import begin, mark
@@ -23,7 +23,9 @@ def decide(body: dict) -> Action:
     rule = get_rule(ctx.table_rule)
     unknown = rule is None
     rule_config = PHASE2_CONFIG.for_rule(ctx.table_rule, solved=not unknown)
-    profiles = profiles_from(ctx)
+    profiles = dict(ATTEMPT_STATE.seat_profiles)
+    if not profiles:
+        profiles = profiles_from_window(ctx)
     ranges = {} if unknown else infer_ranges(ctx, profiles)
     if not unknown and ctx.round_name == "post_reveal" and ctx.community_number is not None:
         win, tie, lose = post_reveal_equity(ctx.your_number, ctx.community_number, ctx.table_rule)
@@ -85,11 +87,15 @@ def _required_edge(ctx, rule_config: RuleConfig) -> float:
         target = PHASE2_CONFIG.target_delta
     else:
         target = CONFIG.chase_if_below_delta
-    if ctx.progress > 0.75 and ctx.chip_delta >= target + 10 and (not ctx.is_phase3 or (ctx.leads_table and ctx.lead_margin >= 25)):
+    protecting = ctx.progress > 0.75 and ctx.chip_delta >= target + 10 and (not ctx.is_phase3 or (ctx.leads_table and ctx.lead_margin >= 25))
+    if protecting:
         edge += CONFIG.protect_lead_tighten
     needs_finish = ctx.chip_delta < target or (ctx.is_phase3 and not ctx.leads_table)
     if ctx.progress > 0.85 and needs_finish:
         edge = max(0.0, edge - CONFIG.chase_loosen)
+    # A 4% pad folded amaranth 12 to a 5-chip open. Cheap calls use raw pot odds.
+    if ctx.risk_fraction < 0.12 and not protecting:
+        edge = 0.0
     return max(0.0, edge)
 
 

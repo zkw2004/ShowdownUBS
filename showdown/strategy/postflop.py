@@ -3,6 +3,7 @@ from __future__ import annotations
 from showdown.config import CONFIG, PHASE2_CONFIG, PHASE3_CONFIG, RuleConfig
 from showdown.models import Action, Context
 from showdown.strategy.profiles import SeatProfile
+from showdown.strategy.ranges import strength_index
 from showdown.strategy.sizing import call_or_check, fraction_of_pot_raise
 from showdown.strategy.trace import mark
 
@@ -80,6 +81,10 @@ def _decide_facing_chips(ctx: Context, share: float, edge: float, ranges: dict[i
 
     if share >= 0.70 and ctx.can_call:
         mark(ctx, "nuts_call", **detail)
+        return Action("call")
+
+    if strength_index(ctx) <= 1 and ctx.can_call and (ctx.adjusted_pot_odds <= 0.50 or ctx.risk_fraction < 0.40):
+        mark(ctx, "top_number_call", **detail)
         return Action("call")
 
     if share >= ctx.adjusted_pot_odds + extra and ctx.can_call:

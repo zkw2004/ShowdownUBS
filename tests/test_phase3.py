@@ -308,6 +308,99 @@ def test_obsidian_opens_the_low_number_and_folds_the_high_number() -> None:
     assert decide(high).action == "fold"
 
 
+def test_ten_calls_a_three_big_blind_open() -> None:
+    """v11 treated a 6-chip open as 13-12 and folded tens (leg 1 hand 26)."""
+    body = cloned_request()
+    body.update(
+        {
+            "phase": 3,
+            "table_rule": "verdigris",
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_number": 10,
+            "to_call": 6,
+            "pot": 9,
+            "your_stack": 200,
+            "min_raise_to": 12,
+            "max_raise_to": 200,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 8}],
+        }
+    )
+    assert decide(body).action in {"call", "raise"}
+
+
+def test_amaranth_twelve_calls_a_five_chip_open() -> None:
+    """v11 folded 12 on amaranth because share 0.394 sat 0.003 under a 4% pad."""
+    body = cloned_request()
+    body.update(
+        {
+            "phase": 3,
+            "table_rule": "amaranth",
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_number": 12,
+            "to_call": 5,
+            "pot": 9,
+            "your_stack": 200,
+            "min_raise_to": 10,
+            "max_raise_to": 200,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 6}],
+        }
+    )
+    assert decide(body).action in {"call", "raise"}
+
+
+def test_obsidian_two_calls_a_large_raise() -> None:
+    """2 is the second-best unpaired number under obsidian; v11 folded it to 107."""
+    body = cloned_request()
+    body.update(
+        {
+            "phase": 3,
+            "table_rule": "obsidian",
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_number": 2,
+            "to_call": 107,
+            "pot": 168,
+            "your_stack": 200,
+            "legal_actions": ["fold", "call"],
+            "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 109}],
+        }
+    )
+    assert decide(body).action == "call"
+
+
+def test_six_max_button_does_not_open_a_seven() -> None:
+    body = _six_seat_body()
+    body.update(
+        {
+            "table_rule": "cinnabar",
+            "round": "pre_reveal",
+            "community_number": None,
+            "your_number": 7,
+            "your_seat": 0,
+            "button_seat": 0,
+            "pot": 3,
+            "to_call": 2,
+            "min_raise_to": 4,
+            "max_raise_to": 200,
+            "legal_actions": ["fold", "call", "raise"],
+            "current_hand_actions": [],
+            "players": [
+                {"seat": 0, "name": "you", "chip_delta": 0, "bet_this_round": 0, "busted": False, "folded": False},
+                {"seat": 1, "name": "Dana", "chip_delta": 0, "bet_this_round": 1, "busted": False, "folded": False},
+                {"seat": 2, "name": "Miles", "chip_delta": 0, "bet_this_round": 2, "busted": False, "folded": False},
+                {"seat": 3, "name": "Theo", "chip_delta": 0, "bet_this_round": 0, "busted": False, "folded": False},
+                {"seat": 4, "name": "Rhea", "chip_delta": 0, "bet_this_round": 0, "busted": False, "folded": False},
+                {"seat": 5, "name": "Bram", "chip_delta": 0, "bet_this_round": 0, "busted": False, "folded": False},
+            ],
+        }
+    )
+    assert decide(body).action == "fold"
+
+
 def test_strategy_code_does_not_hardcode_opponent_names() -> None:
     from pathlib import Path
 

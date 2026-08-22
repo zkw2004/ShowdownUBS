@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from showdown.config import CONFIG, PHASE2_CONFIG, RuleConfig
 from showdown.models import Action, Context
-from showdown.strategy.ranges import position_name
+from showdown.strategy.ranges import position_name, strength_index
 from showdown.strategy.sizing import call_or_check, multiple_of_amount_raise, raise_action
 from showdown.strategy.trace import mark
 
@@ -69,6 +69,10 @@ def _respond_to_raise(
         mark(ctx, "preflop_premium_call", **detail)
         return Action("call")
 
+    if strength_index(ctx) <= 1 and ctx.can_call and (ctx.adjusted_pot_odds <= 0.50 or ctx.risk_fraction < 0.40):
+        mark(ctx, "preflop_top_number_call", **detail)
+        return Action("call")
+
     if _should_call(share, ctx, edge):
         mark(ctx, "preflop_raise_call", **detail)
         return Action("call") if ctx.can_call else call_or_check(ctx)
@@ -100,7 +104,11 @@ def _decide_first_in(ctx: Context, percentile: float, rule_config: RuleConfig) -
         "sb": rule_config.open_raise_min_percentile,
         "bb": rule_config.open_raise_min_percentile + 0.12,
     }[position]
-    open_need = max(0.35, min(0.85, open_need))
+    if ctx.is_phase3 and ctx.live_opponent_count >= 2:
+        # v11 opened sevens from the button and bled chips to callers with tens.
+        open_need = {"ep": 0.78, "mp": 0.70, "co": 0.62, "btn": 0.60, "sb": 0.66, "bb": 0.72}[position]
+    else:
+        open_need = max(0.35, min(0.85, open_need))
 
     if percentile >= open_need + 0.18:
         mark(ctx, "preflop_open_raise", position=position)

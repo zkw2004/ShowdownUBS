@@ -36,7 +36,7 @@ class SeatProfile:
         return (self.post_bets + 2.0) / (self.post_actions + 6.0)
 
 
-def profiles_from(ctx: Context) -> dict[int, SeatProfile]:
+def profiles_from_window(ctx: Context) -> dict[int, SeatProfile]:
     """Rebuild per-seat stats from `recent_hands` on every request.
 
     The protocol already sends the last 20 completed hands. Using that window

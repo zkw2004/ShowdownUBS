@@ -7,6 +7,7 @@ from showdown.models import Action, parse_context
 from showdown.strategy.postflop import decide_postflop
 from showdown.strategy.preflop import decide_preflop
 from showdown.strategy.state import ATTEMPT_STATE
+from showdown.strategy.trace import begin, mark
 
 
 def decide(body: dict) -> Action:
@@ -26,10 +27,23 @@ def decide(body: dict) -> Action:
     percentile = _percentile(ctx, adjusted_equity, unknown)
     aggression_margin = _effective_call_margin(ctx, rule_config)
     bluff_enabled = _bluff_enabled(ctx) and not unknown
+    begin(
+        ctx,
+        rule_known=not unknown,
+        win_equity=round(win, 4),
+        tie_equity=round(tie, 4),
+        adjusted_equity=round(adjusted_equity, 4),
+        percentile=round(percentile, 4),
+        call_margin=round(aggression_margin, 4),
+        bluff_enabled=bluff_enabled,
+        max_commitment_fraction=rule_config.max_commitment_fraction,
+    )
 
     if ctx.round_name == "post_reveal" and ctx.community_number is not None:
         return decide_postflop(ctx, win, tie, adjusted_equity, aggression_margin, bluff_enabled, rule_config, unknown)
-    return decide_preflop(ctx, adjusted_equity, percentile, rule_config, unknown)
+    action = decide_preflop(ctx, adjusted_equity, percentile, rule_config, unknown)
+    mark(ctx, "preflop_policy")
+    return action
 
 
 def _effective_call_margin(ctx, rule_config: RuleConfig) -> float:

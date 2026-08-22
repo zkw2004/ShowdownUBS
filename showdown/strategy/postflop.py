@@ -3,6 +3,7 @@ from __future__ import annotations
 from showdown.config import CONFIG, PHASE2_CONFIG, RuleConfig
 from showdown.models import Action, Context
 from showdown.strategy.sizing import call_or_check, fraction_of_pot_raise, multiple_of_amount_raise
+from showdown.strategy.trace import mark
 
 
 def decide_postflop(
@@ -16,7 +17,9 @@ def decide_postflop(
     unknown: bool,
 ) -> Action:
     if unknown:
-        return _unknown_action(ctx)
+        action = _unknown_action(ctx)
+        mark(ctx, "unknown_rule_fallback")
+        return action
 
     # A large re-raise from the rule-aware opponent is much stronger evidence
     # than our unconditional equity against a random number.  Phase 2 awards
@@ -28,6 +31,7 @@ def decide_postflop(
         and ctx.to_call / max(ctx.your_stack, 1) > 0.15
         and ctx.can_fold
     ):
+        mark(ctx, "risk_cap_fold", risk_fraction=round(ctx.to_call / max(ctx.your_stack, 1), 4))
         return Action("fold")
 
     # Do not turn a normal value bet into a raising war.  The opponent knows
@@ -36,31 +40,41 @@ def decide_postflop(
     # with a cheap call or release the hand; never make the second re-raise.
     if _opponent_raised_post_reveal(ctx):
         if ctx.to_call / max(ctx.your_stack, 1) <= 0.08 and ctx.can_call:
+            mark(ctx, "opponent_raise_cheap_call", risk_fraction=round(ctx.to_call / max(ctx.your_stack, 1), 4))
             return Action("call")
+        mark(ctx, "opponent_raise_fold", risk_fraction=round(ctx.to_call / max(ctx.your_stack, 1), 4))
         return Action("fold")
 
     if ctx.to_call == 0:
         if adjusted_equity >= max(rule_config.value_bet_min_equity + 0.10, 0.74):
+            mark(ctx, "strong_value_bet")
             return fraction_of_pot_raise(ctx, rule_config.bet_size_pot_fraction)
         if adjusted_equity >= rule_config.value_bet_min_equity:
             if ctx.acting_last:
+                mark(ctx, "medium_value_bet")
                 return fraction_of_pot_raise(ctx, rule_config.bet_size_pot_fraction * 0.65, prefer_call=True)
+            mark(ctx, "medium_value_check")
             return Action("check")
         if adjusted_equity < CONFIG.low_equity_bluff_threshold and bluff_enabled and ctx.acting_last:
+            mark(ctx, "bluff_bet")
             return fraction_of_pot_raise(
                 ctx,
                 CONFIG.bluff_bet_fraction,
                 cap_fraction_of_stack=min(CONFIG.bluff_max_stack_fraction, rule_config.max_commitment_fraction),
                 prefer_call=True,
             )
+        mark(ctx, "check")
         return Action("check")
 
     if _should_raise_for_value(ctx, adjusted_equity, aggression_margin):
         seen_total = ctx.my_bet_this_round + ctx.to_call
+        mark(ctx, "value_raise")
         return multiple_of_amount_raise(ctx, seen_total, CONFIG.value_raise_multiplier, cap_fraction_of_stack=rule_config.max_commitment_fraction)
 
     if _should_call(ctx, adjusted_equity, aggression_margin):
+        mark(ctx, "pot_odds_call")
         return Action("call")
+    mark(ctx, "pot_odds_fold")
     return Action("fold")
 
 

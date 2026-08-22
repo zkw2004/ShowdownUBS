@@ -55,5 +55,6 @@ def _trace(body: dict, response: dict) -> dict:
         "min_raise_to": body.get("min_raise_to"),
         "max_raise_to": body.get("max_raise_to"),
         "current_hand_actions": body.get("current_hand_actions"),
+        "decision": body.get("_decision_trace"),
         "response": response,
     }

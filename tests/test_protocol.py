@@ -44,3 +44,9 @@ def test_move_trace_captures_decision_inputs() -> None:
     assert trace["leg"] == 2
     assert trace["your_number"] == body["your_number"]
     assert trace["response"] == {"action": "call"}
+
+
+def test_move_trace_includes_strategy_explanation() -> None:
+    body = cloned_request()
+    body["_decision_trace"] = {"adjusted_equity": 0.8, "reason": "value_raise"}
+    assert _trace(body, {"action": "raise", "amount": 12})["decision"]["reason"] == "value_raise"

@@ -21,12 +21,27 @@ def test_preflop_button_low_number_completes() -> None:
     assert action.action == "call"
 
 
-def test_postflop_pair_raises_for_value() -> None:
+def test_postflop_pair_calls_a_bet_instead_of_raising() -> None:
     body = cloned_request()
     body["your_number"] = 7
     body["community_number"] = 7
     action = decide(body)
-    assert action.action == "raise"
+    assert action.action == "call"
+
+
+def test_postflop_pair_bets_when_checked_to() -> None:
+    body = cloned_request()
+    body.update({
+        "your_number": 7,
+        "community_number": 7,
+        "to_call": 0,
+        "pot": 16,
+        "min_raise_to": 2,
+        "max_raise_to": 185,
+        "legal_actions": ["check", "bet"],
+    })
+    action = decide(body)
+    assert action.action == "bet"
     assert action.amount is not None
 
 

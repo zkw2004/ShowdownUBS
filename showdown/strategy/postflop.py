@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from showdown.config import CONFIG, PHASE2_CONFIG, RuleConfig
 from showdown.models import Action, Context
-from showdown.strategy.sizing import call_or_check, fraction_of_pot_raise, multiple_of_amount_raise
+from showdown.strategy.sizing import fraction_of_pot_raise
 from showdown.strategy.trace import mark
 
 
@@ -21,32 +21,31 @@ def decide_postflop(
         mark(ctx, "unknown_rule_fallback")
         return action
 
-    # A large re-raise from the rule-aware opponent is much stronger evidence
-    # than our unconditional equity against a random number.  Phase 2 awards
-    # points per leg, so turning a value hand into a 200-chip bust is worse
-    # than releasing it and preserving the remaining hands.  This is a hard
-    # risk cap: no post-reveal call or re-raise may risk over 15% of stack.
-    if (
-        ctx.to_call > 0
-        and ctx.to_call / max(ctx.your_stack, 1) > 0.15
-        and ctx.can_fold
-    ):
-        mark(ctx, "risk_cap_fold", risk_fraction=round(ctx.to_call / max(ctx.your_stack, 1), 4))
+    # Pair / best unpaired number: never fold, and never turn a call into a
+    # raising war.  Live logs showed the bot raising 12s to 52, folding the
+    # jam, then later folding actual pairs once the 15%-of-stack cap fired
+    # on a short stack.  That is how legs 1/3/4 dumped 50-150 chips.
+    is_nuts = adjusted_equity >= 0.92
+    if ctx.to_call > 0 and is_nuts and ctx.can_call:
+        mark(ctx, "nuts_call")
+        return Action("call")
+
+    # Only a true jam is a "risk cap".  Measuring against current stack made
+    # every 15-chip bet uncallable after one lost pot, which is how a 12
+    # kept folding its way from -50 to -147.
+    risk_fraction = ctx.to_call / max(ctx.your_stack, 1)
+    if ctx.to_call > 0 and risk_fraction > 0.40 and ctx.can_fold:
+        mark(ctx, "risk_cap_fold", risk_fraction=round(risk_fraction, 4))
         return Action("fold")
 
-    # Do not turn a normal value bet into a raising war.  The opponent knows
-    # the table rule, while our equity is calculated against an unconditioned
-    # random number.  After their post-reveal raise, preserve showdown value
-    # with a cheap call or release the hand; never make the second re-raise.
-    if _opponent_raised_post_reveal(ctx):
-        risk_fraction = ctx.to_call / max(ctx.your_stack, 1)
-        if risk_fraction <= 0.12 and adjusted_equity >= 0.80 and ctx.can_call:
-            mark(ctx, "opponent_raise_value_call", risk_fraction=round(risk_fraction, 4))
+    # Facing a post-reveal bet or raise: call or fold, never raise.  Axl
+    # answers raises with 100+ chip jams; inflating then folding is the
+    # single leak that lost Hand 1 of the scored attempt.
+    if ctx.to_call > 0:
+        if _should_call(ctx, adjusted_equity, aggression_margin):
+            mark(ctx, "pot_odds_call" if not _opponent_raised_post_reveal(ctx) else "opponent_raise_value_call")
             return Action("call")
-        if risk_fraction <= 0.05 and adjusted_equity >= 0.55 and ctx.can_call:
-            mark(ctx, "opponent_raise_cheap_call", risk_fraction=round(risk_fraction, 4))
-            return Action("call")
-        mark(ctx, "opponent_raise_fold", risk_fraction=round(risk_fraction, 4))
+        mark(ctx, "pot_odds_fold" if not _opponent_raised_post_reveal(ctx) else "opponent_raise_fold")
         return Action("fold")
 
     if ctx.to_call == 0:
@@ -69,16 +68,6 @@ def decide_postflop(
             )
         mark(ctx, "check")
         return Action("check")
-
-    if _should_raise_for_value(ctx, adjusted_equity, aggression_margin):
-        seen_total = ctx.my_bet_this_round + ctx.to_call
-        mark(ctx, "value_raise")
-        return multiple_of_amount_raise(ctx, seen_total, CONFIG.value_raise_multiplier, cap_fraction_of_stack=rule_config.max_commitment_fraction)
-
-    if _should_call(ctx, adjusted_equity, aggression_margin):
-        mark(ctx, "pot_odds_call")
-        return Action("call")
-    mark(ctx, "pot_odds_fold")
     return Action("fold")
 
 
@@ -100,12 +89,6 @@ def _opponent_raised_post_reveal(ctx: Context) -> bool:
         if action.get("round") == "post_reveal" and action.get("seat") != ctx.your_seat and action.get("action") == "raise":
             return True
     return False
-
-
-def _should_raise_for_value(ctx: Context, adjusted_equity: float, aggression_margin: float) -> bool:
-    if not ctx.can_raise:
-        return False
-    return adjusted_equity > ctx.adjusted_pot_odds + aggression_margin and adjusted_equity >= CONFIG.strong_raise_equity
 
 
 def _should_call(ctx: Context, adjusted_equity: float, aggression_margin: float) -> bool:

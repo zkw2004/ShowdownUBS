@@ -109,6 +109,47 @@ def test_pre_reveal_reraise_war_is_folded_before_large_commitment() -> None:
     assert decide(body).action == "fold"
 
 
+def test_facing_a_post_reveal_bet_does_not_inflate_then_fold() -> None:
+    """Hand 1 of the scored attempt: 12 vs 7, Axl bets 21, we raised to 52, folded the jam."""
+    body = cloned_request()
+    body.update({
+        "table_rule": "verdigris",
+        "round": "post_reveal",
+        "your_number": 12,
+        "community_number": 7,
+        "pot": 53,
+        "to_call": 21,
+        "your_stack": 184,
+        "min_raise_to": 42,
+        "max_raise_to": 184,
+        "legal_actions": ["fold", "call", "raise"],
+        "current_hand_actions": [
+            {"seat": 0, "round": "pre_reveal", "action": "raise", "amount": 6},
+            {"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 16},
+            {"seat": 0, "round": "pre_reveal", "action": "call", "amount": 16},
+            {"seat": 1, "round": "post_reveal", "action": "bet", "amount": 21},
+        ],
+    })
+    assert decide(body).action == "call"
+
+
+def test_pair_calls_a_short_stack_jam() -> None:
+    body = cloned_request()
+    body.update({
+        "table_rule": "standard",
+        "round": "post_reveal",
+        "your_number": 12,
+        "community_number": 12,
+        "pot": 94,
+        "to_call": 42,
+        "your_stack": 150,
+        "legal_actions": ["fold", "call", "raise"],
+        "min_raise_to": 84,
+        "max_raise_to": 150,
+    })
+    assert decide(body).action == "call"
+
+
 def test_strong_hand_defends_a_single_small_pre_reveal_raise() -> None:
     body = cloned_request()
     body.update({

@@ -37,19 +37,18 @@ def test_move_handles_unknown_fields() -> None:
     assert response.json()["action"] in body["legal_actions"]
 
 
-def test_move_trace_captures_decision_inputs() -> None:
+def test_move_trace_logs_the_full_request_and_reply() -> None:
     body = cloned_request()
     body["leg_number"] = 2
-    trace = _move_trace(body, {"action": "call"})
-    assert trace["leg"] == 2
-    assert trace["your_number"] == body["your_number"]
-    assert trace["response"] == {"action": "call"}
-
-
-def test_move_trace_includes_strategy_explanation() -> None:
-    body = cloned_request()
+    body["recent_hands"] = [{"hand_number": 1}]
     body["_decision_trace"] = {"adjusted_equity": 0.8, "reason": "value_raise"}
-    assert _move_trace(body, {"action": "raise", "amount": 12})["decision"]["reason"] == "value_raise"
+    trace = _move_trace(body, {"action": "call"})
+    assert trace["response"] == {"action": "call"}
+    assert trace["request"]["leg_number"] == 2
+    assert trace["request"]["your_number"] == body["your_number"]
+    assert trace["request"]["players"] == body["players"]
+    assert trace["request"]["_decision_trace"]["reason"] == "value_raise"
+    assert "recent_hands" not in trace["request"]
 
 
 def test_audit_confirms_a_correct_mapping() -> None:

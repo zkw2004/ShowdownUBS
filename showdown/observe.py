@@ -119,25 +119,11 @@ def _tally(codename: str, verdict: str) -> dict[str, int]:
 
 
 def _move_trace(body: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
-    """Every input that affects a decision, minus the 20-hand duplicate history."""
-    players = body.get("players") or []
-    return {
-        "match_id": body.get("match_id"),
-        "phase": body.get("phase"),
-        "leg": body.get("leg_number"),
-        "rule": body.get("table_rule"),
-        "hand": body.get("hand_number"),
-        "round": body.get("round"),
-        "your_number": body.get("your_number"),
-        "community_number": body.get("community_number"),
-        "pot": body.get("pot"),
-        "to_call": body.get("to_call"),
-        "your_stack": body.get("your_stack"),
-        "chip_delta": next((player.get("chip_delta") for player in players if player.get("name") == "you"), None),
-        "legal_actions": body.get("legal_actions"),
-        "min_raise_to": body.get("min_raise_to"),
-        "max_raise_to": body.get("max_raise_to"),
-        "current_hand_actions": body.get("current_hand_actions"),
-        "decision": body.get("_decision_trace"),
-        "response": response,
-    }
+    """The full coordinator request and our exact reply.
+
+    `recent_hands` is omitted here because each completed hand is already
+    emitted once as `hand_result`. Repeating the last 20 hands on every
+    /move would overflow Heroku's log buffer mid-attempt.
+    """
+    request = {key: value for key, value in body.items() if key != "recent_hands"}
+    return {"request": request, "response": response}

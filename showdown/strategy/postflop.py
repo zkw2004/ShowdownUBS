@@ -39,10 +39,14 @@ def decide_postflop(
     # random number.  After their post-reveal raise, preserve showdown value
     # with a cheap call or release the hand; never make the second re-raise.
     if _opponent_raised_post_reveal(ctx):
-        if ctx.to_call / max(ctx.your_stack, 1) <= 0.08 and ctx.can_call:
-            mark(ctx, "opponent_raise_cheap_call", risk_fraction=round(ctx.to_call / max(ctx.your_stack, 1), 4))
+        risk_fraction = ctx.to_call / max(ctx.your_stack, 1)
+        if risk_fraction <= 0.12 and adjusted_equity >= 0.80 and ctx.can_call:
+            mark(ctx, "opponent_raise_value_call", risk_fraction=round(risk_fraction, 4))
             return Action("call")
-        mark(ctx, "opponent_raise_fold", risk_fraction=round(ctx.to_call / max(ctx.your_stack, 1), 4))
+        if risk_fraction <= 0.05 and adjusted_equity >= 0.55 and ctx.can_call:
+            mark(ctx, "opponent_raise_cheap_call", risk_fraction=round(risk_fraction, 4))
+            return Action("call")
+        mark(ctx, "opponent_raise_fold", risk_fraction=round(risk_fraction, 4))
         return Action("fold")
 
     if ctx.to_call == 0:

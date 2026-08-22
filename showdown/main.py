@@ -38,6 +38,7 @@ async def move(request: Request) -> dict:
 def _trace(body: dict, response: dict) -> dict:
     """Log every input that affects a decision, without the 20-hand duplicate history."""
     players = body.get("players") or []
+    recent_hands = body.get("recent_hands") or []
     return {
         "match_id": body.get("match_id"),
         "leg": body.get("leg_number"),
@@ -55,6 +56,9 @@ def _trace(body: dict, response: dict) -> dict:
         "min_raise_to": body.get("min_raise_to"),
         "max_raise_to": body.get("max_raise_to"),
         "current_hand_actions": body.get("current_hand_actions"),
+        # One completed record supplies the showdown winner/numbers needed to
+        # validate the active secret-rule mapping without repeating 20 hands.
+        "last_completed_hand": recent_hands[-1] if recent_hands else None,
         "decision": body.get("_decision_trace"),
         "response": response,
     }

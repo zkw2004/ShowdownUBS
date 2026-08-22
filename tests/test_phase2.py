@@ -107,3 +107,17 @@ def test_pre_reveal_reraise_war_is_folded_before_large_commitment() -> None:
         ],
     })
     assert decide(body).action == "fold"
+
+
+def test_strong_hand_defends_a_single_small_pre_reveal_raise() -> None:
+    body = cloned_request()
+    body.update({
+        "table_rule": "standard",
+        "round": "pre_reveal",
+        "your_number": 13,
+        "to_call": 3,
+        "your_stack": 200,
+        "legal_actions": ["fold", "call", "raise"],
+        "current_hand_actions": [{"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 5}],
+    })
+    assert decide(body).action == "call"

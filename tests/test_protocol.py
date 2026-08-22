@@ -50,3 +50,9 @@ def test_move_trace_includes_strategy_explanation() -> None:
     body = cloned_request()
     body["_decision_trace"] = {"adjusted_equity": 0.8, "reason": "value_raise"}
     assert _trace(body, {"action": "raise", "amount": 12})["decision"]["reason"] == "value_raise"
+
+
+def test_move_trace_includes_latest_completed_hand() -> None:
+    body = cloned_request()
+    body["recent_hands"] = [{"hand_number": 1}, {"hand_number": 2, "winners": [0]}]
+    assert _trace(body, {"action": "check"})["last_completed_hand"] == {"hand_number": 2, "winners": [0]}

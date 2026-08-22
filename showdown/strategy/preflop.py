@@ -14,11 +14,14 @@ def decide_preflop(ctx: Context, adjusted_equity: float, percentile: float, rule
     if ctx.to_call > 0 and risk_fraction > 0.12 and ctx.can_fold:
         mark(ctx, "preflop_risk_cap_fold", risk_fraction=round(risk_fraction, 4))
         return Action("fold")
-    if _opponent_raised_pre_reveal(ctx):
-        if risk_fraction <= 0.04 and adjusted_equity >= 0.55 and ctx.can_call:
-            mark(ctx, "preflop_raise_cheap_call", risk_fraction=round(risk_fraction, 4))
+    opponent_raises = _opponent_pre_reveal_raise_count(ctx)
+    if opponent_raises:
+        # A single normal open is worth defending with a genuinely strong
+        # number.  A second opponent raise is a raising war: exit it.
+        if opponent_raises == 1 and risk_fraction <= 0.08 and adjusted_equity >= 0.70 and ctx.can_call:
+            mark(ctx, "preflop_raise_value_call", risk_fraction=round(risk_fraction, 4))
             return Action("call")
-        mark(ctx, "preflop_raise_fold", risk_fraction=round(risk_fraction, 4))
+        mark(ctx, "preflop_raise_fold", risk_fraction=round(risk_fraction, 4), opponent_raises=opponent_raises)
         return Action("fold")
 
     is_button = ctx.your_seat == ctx.button_seat
@@ -79,10 +82,12 @@ def _unknown_call_or_fold(ctx: Context) -> Action:
     return Action("fold")
 
 
-def _opponent_raised_pre_reveal(ctx: Context) -> bool:
-    for action in ctx.raw.get("current_hand_actions") or []:
-        if not isinstance(action, dict):
-            continue
-        if action.get("round") == "pre_reveal" and action.get("seat") != ctx.your_seat and action.get("action") == "raise":
-            return True
-    return False
+def _opponent_pre_reveal_raise_count(ctx: Context) -> int:
+    return sum(
+        1
+        for action in ctx.raw.get("current_hand_actions") or []
+        if isinstance(action, dict)
+        and action.get("round") == "pre_reveal"
+        and action.get("seat") != ctx.your_seat
+        and action.get("action") == "raise"
+    )

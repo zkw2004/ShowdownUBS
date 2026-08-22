@@ -88,3 +88,22 @@ def test_post_reveal_opponent_raise_is_not_reraised() -> None:
         ],
     })
     assert decide(body).action == "call"
+
+
+def test_pre_reveal_reraise_war_is_folded_before_large_commitment() -> None:
+    body = cloned_request()
+    body.update({
+        "table_rule": "standard",
+        "round": "pre_reveal",
+        "your_number": 13,
+        "to_call": 19,
+        "your_stack": 223,
+        "pot": 43,
+        "legal_actions": ["fold", "call", "raise"],
+        "current_hand_actions": [
+            {"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 5},
+            {"seat": 0, "round": "pre_reveal", "action": "raise", "amount": 12},
+            {"seat": 1, "round": "pre_reveal", "action": "raise", "amount": 31},
+        ],
+    })
+    assert decide(body).action == "fold"

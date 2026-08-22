@@ -42,7 +42,8 @@ def decide(body: dict) -> Action:
     if ctx.round_name == "post_reveal" and ctx.community_number is not None:
         return decide_postflop(ctx, win, tie, adjusted_equity, aggression_margin, bluff_enabled, rule_config, unknown)
     action = decide_preflop(ctx, adjusted_equity, percentile, rule_config, unknown)
-    mark(ctx, "preflop_policy")
+    if "reason" not in ctx.raw.get("_decision_trace", {}):
+        mark(ctx, "preflop_policy")
     return action
 
 

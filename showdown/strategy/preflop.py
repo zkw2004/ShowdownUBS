@@ -3,9 +3,24 @@ from __future__ import annotations
 from showdown.config import PHASE2_CONFIG, RuleConfig
 from showdown.models import Action, Context
 from showdown.strategy.sizing import call_or_check, raise_action
+from showdown.strategy.trace import mark
 
 
 def decide_preflop(ctx: Context, adjusted_equity: float, percentile: float, rule_config: RuleConfig, unknown: bool) -> Action:
+    # The opponent's repeated pre-reveal raises identify a much stronger range
+    # than the uniform opponent used by our equity table.  Never let an open
+    # raise turn into a stack-threatening pre-reveal guessing contest.
+    risk_fraction = ctx.to_call / max(ctx.your_stack, 1)
+    if ctx.to_call > 0 and risk_fraction > 0.12 and ctx.can_fold:
+        mark(ctx, "preflop_risk_cap_fold", risk_fraction=round(risk_fraction, 4))
+        return Action("fold")
+    if _opponent_raised_pre_reveal(ctx):
+        if risk_fraction <= 0.04 and adjusted_equity >= 0.55 and ctx.can_call:
+            mark(ctx, "preflop_raise_cheap_call", risk_fraction=round(risk_fraction, 4))
+            return Action("call")
+        mark(ctx, "preflop_raise_fold", risk_fraction=round(risk_fraction, 4))
+        return Action("fold")
+
     is_button = ctx.your_seat == ctx.button_seat
     if is_button:
         return _decide_button(ctx, adjusted_equity, percentile, rule_config, unknown)
@@ -62,3 +77,12 @@ def _unknown_call_or_fold(ctx: Context) -> Action:
     if ctx.to_call <= cap and ctx.to_call < ctx.your_stack and ctx.can_call:
         return Action("call")
     return Action("fold")
+
+
+def _opponent_raised_pre_reveal(ctx: Context) -> bool:
+    for action in ctx.raw.get("current_hand_actions") or []:
+        if not isinstance(action, dict):
+            continue
+        if action.get("round") == "pre_reveal" and action.get("seat") != ctx.your_seat and action.get("action") == "raise":
+            return True
+    return False
